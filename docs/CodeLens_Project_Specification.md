@@ -1,7 +1,7 @@
 # CodeLens: GraphRAG-Powered Code Intelligence Platform
 
-**Project Specification Document**  
-Version 1.0 — MVP Scope  
+**Project Specification Document** 
+Version 1.0 — MVP Scope 
 March 2026
 
 ---
@@ -65,7 +65,7 @@ A PM queries "discount eligibility rules" in Product persona mode and sees:
 When a PR touches the pricing module:
 - Rule Change Simulator diffs the base vs. head branch subgraphs
 - Detects modified, added, or removed rules
-- Posts structured PR comment: *"⚠️ Business logic changed: discount cap raised 15% → 20%, grace period rule removed"*
+- Posts structured PR comment: *" Business logic changed: discount cap raised 15% → 20%, grace period rule removed"*
 
 **Outcome:** No business logic changes ship silently; PM reviews before merge.
 
@@ -93,30 +93,30 @@ New hire queries "user authentication rules" in Developer mode:
 
 ### Functional Requirements Summary
 
-| ID  | Requirement              | Key Features |
+| ID | Requirement | Key Features |
 |-----|--------------------------|--------------|
-| FR1 | Ingestion & Indexing     | Tree-sitter AST parsing (Python/TypeScript), Neo4j storage, vector embeddings, incremental re-indexing via webhooks |
-| FR2 | Rule Extraction          | LangGraph agent traversal, LLM-synthesized rule statements, domain entity clustering, source traceability |
-| FR3 | Business Logic Mapper    | Searchable rule registry, domain browsing, auto-generated sequence/component diagrams (Mermaid) |
-| FR4 | Persona Explainer        | Three modes (Developer/Product/Legal), switchable per query, graph-grounded rendering |
-| FR5 | Rule Change Simulator    | GitHub/GitLab webhooks, branch diff, change classification, automated PR comments, CLI dry-run |
-| FR6 | Export & Integration     | PDF export, REST API, CLI tools (index, search, simulate, export) |
+| FR1 | Ingestion & Indexing | Tree-sitter AST parsing (Python/TypeScript), Neo4j storage, vector embeddings, incremental re-indexing via webhooks |
+| FR2 | Rule Extraction | LangGraph agent traversal, LLM-synthesized rule statements, domain entity clustering, source traceability |
+| FR3 | Business Logic Mapper | Searchable rule registry, domain browsing, auto-generated sequence/component diagrams (Mermaid) |
+| FR4 | Persona Explainer | Three modes (Developer/Product/Legal), switchable per query, graph-grounded rendering |
+| FR5 | Rule Change Simulator | GitHub/GitLab webhooks, branch diff, change classification, automated PR comments, CLI dry-run |
+| FR6 | Export & Integration | PDF export, REST API, CLI tools (index, search, simulate, export) |
 
 ### Non-Functional Requirements Summary
 
-| Category    | Requirement                   | Target Metric |
+| Category | Requirement | Target Metric |
 |-------------|-------------------------------|---------------|
-| Performance | Indexing speed                | < 5 min for 100k LOC |
-| Performance | Query latency                 | < 2 sec for rule search with persona rendering |
-| Performance | PR simulation latency         | < 45 sec from push to comment |
-| Accuracy    | Rule extraction precision     | > 90% on human-validated samples |
-| Scalability | Incremental re-indexing       | Typical PR (5–10 files) processes in 30–45 sec |
-| Scalability | Graph capacity (free tier)    | Up to 200k nodes, 400k relationships (Neo4j AuraDB Free) |
-| Reliability | Webhook failures              | Retry logic, manual re-index fallback, staleness warning UI |
-| Reliability | Cache invalidation            | Deterministic invalidation on rule node staleness |
-| Cost        | Demo/MVP cost                 | $0–5/month using free-tier infrastructure |
-| Usability   | Persona switching             | Persists per session, switchable per query |
-| Usability   | Export formats                | PDF for compliance/audit packages |
+| Performance | Indexing speed | < 5 min for 100k LOC |
+| Performance | Query latency | < 2 sec for rule search with persona rendering |
+| Performance | PR simulation latency | < 45 sec from push to comment |
+| Accuracy | Rule extraction precision | > 90% on human-validated samples |
+| Scalability | Incremental re-indexing | Typical PR (5–10 files) processes in 30–45 sec |
+| Scalability | Graph capacity (free tier) | Up to 200k nodes, 400k relationships (Neo4j AuraDB Free) |
+| Reliability | Webhook failures | Retry logic, manual re-index fallback, staleness warning UI |
+| Reliability | Cache invalidation | Deterministic invalidation on rule node staleness |
+| Cost | Demo/MVP cost | $0–5/month using free-tier infrastructure |
+| Usability | Persona switching | Persists per session, switchable per query |
+| Usability | Export formats | PDF for compliance/audit packages |
 
 ---
 
@@ -152,9 +152,9 @@ New hire queries "user authentication rules" in Developer mode:
 ### FR-4: Persona Explainer
 
 - Three rendering modes: **Developer**, **Product**, **Legal**
-  - **Developer:** rule + code references + call chain + types
-  - **Product:** plain English + example scenarios + no code
-  - **Legal:** policy-clause format + traceability + export-ready
+ - **Developer:** rule + code references + call chain + types
+ - **Product:** plain English + example scenarios + no code
+ - **Legal:** policy-clause format + traceability + export-ready
 - Mode switchable per query, persists per session
 - All modes grounded to same graph nodes (no hallucination)
 
@@ -181,64 +181,64 @@ New hire queries "user authentication rules" in Developer mode:
 ### High-Level Component Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        PRESENTATION LAYER                        │
-├──────────────────────────────────────┬───────────────────────────┤
-│          Web UI (Next.js)            │        CLI (Python)        │
-│  • Rule Explorer                     │  • codelens index          │
-│  • Persona Switcher                  │  • codelens search         │
-│  • React Flow Graph Viz              │  • codelens simulate       │
-│  • PR Impact Feed                    │  • codelens export         │
-└──────────────────────────────────────┴───────────────────────────┘
-                          ▲
-                   REST API / GraphQL
-                          ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                          FEATURE LAYER                           │
-├──────────────────┬──────────────────────┬────────────────────────┤
-│  Business Logic  │   Persona Explainer  │  Rule Change Simulator │
-│  Mapper          │                      │                        │
-│  • Rule Search   │  • Dev Mode          │  • Branch Diff         │
-│  • Domain Browse │  • Product Mode      │  • Change Classification│
-│  • Diagram Gen   │  • Legal Mode        │  • PR Comment Bot      │
-└──────────────────┴──────────────────────┴────────────────────────┘
-                          ▲
-              Cypher Queries / Vector Search
-                          ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                       INTELLIGENCE LAYER                         │
-├──────────────────────────────────────┬───────────────────────────┤
-│         GraphRAG Indexer             │      LangGraph Agent       │
-│  • Community Detection (Leiden)      │  • Rule Extraction         │
-│  • Domain Clustering                 │  • Multi-hop Traversal     │
-│  • Semantic Embeddings               │  • LLM Synthesis           │
-└──────────────────────────────────────┴───────────────────────────┘
-                          ▲
-              Read/Write Graph Operations
-                          ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                         STORAGE LAYER                            │
-├──────────────────────────────────────┬───────────────────────────┤
-│          Neo4j Graph DB              │  Redis Cache + PostgreSQL  │
-│  • Code Graph (nodes/edges)          │  • Query Response Cache    │
-│  • Rule Nodes                        │  • User Sessions           │
-│  • Vector Index                      │  • Job Metadata            │
-└──────────────────────────────────────┴───────────────────────────┘
-                          ▲
-                    Parsed AST Data
-                          ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                        INGESTION LAYER                           │
-├──────────────────────────────────────┬───────────────────────────┤
-│       Tree-sitter AST Parser         │  GitHub/GitLab Webhook     │
-│  • Python/TypeScript Support         │  • Push Events             │
-│  • Entity/Edge Extraction            │  • PR Events               │
-│  • Incremental Re-parse              │  • Stale Node Marking      │
-└──────────────────────────────────────┴───────────────────────────┘
-                          ▲
-                    Git Repository
-                          ▼
-                  [ Source Code Repo ]
+
+ PRESENTATION LAYER 
+
+ Web UI (Next.js) CLI (Python) 
+ • Rule Explorer • codelens index 
+ • Persona Switcher • codelens search 
+ • React Flow Graph Viz • codelens simulate 
+ • PR Impact Feed • codelens export 
+
+ 
+ REST API / GraphQL
+ 
+
+ FEATURE LAYER 
+
+ Business Logic Persona Explainer Rule Change Simulator 
+ Mapper 
+ • Rule Search • Dev Mode • Branch Diff 
+ • Domain Browse • Product Mode • Change Classification
+ • Diagram Gen • Legal Mode • PR Comment Bot 
+
+ 
+ Cypher Queries / Vector Search
+ 
+
+ INTELLIGENCE LAYER 
+
+ GraphRAG Indexer LangGraph Agent 
+ • Community Detection (Leiden) • Rule Extraction 
+ • Domain Clustering • Multi-hop Traversal 
+ • Semantic Embeddings • LLM Synthesis 
+
+ 
+ Read/Write Graph Operations
+ 
+
+ STORAGE LAYER 
+
+ Neo4j Graph DB Redis Cache + PostgreSQL 
+ • Code Graph (nodes/edges) • Query Response Cache 
+ • Rule Nodes • User Sessions 
+ • Vector Index • Job Metadata 
+
+ 
+ Parsed AST Data
+ 
+
+ INGESTION LAYER 
+
+ Tree-sitter AST Parser GitHub/GitLab Webhook 
+ • Python/TypeScript Support • Push Events 
+ • Entity/Edge Extraction • PR Events 
+ • Incremental Re-parse • Stale Node Marking 
+
+ 
+ Git Repository
+ 
+ [ Source Code Repo ]
 ```
 
 ### Data Flow
