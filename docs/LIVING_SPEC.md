@@ -2,7 +2,7 @@
 
 > **Status:** Active — this document supersedes `CodeLens_Project_Specification.md` for implementation decisions. 
 > **Last updated:** April 2026 
-> **Version:** 0.2
+> **Version:** 0.3
 
 ---
 
@@ -10,11 +10,15 @@
 
 CodeLens is a **code intelligence infrastructure layer** — not a chatbot, not a code assistant.
 
-It indexes a codebase into a structured knowledge graph (Neo4j), extracts business rules from that graph using LLM preprocessing, and exposes the result through a **Model Context Protocol (MCP) server** so that any AI agent (Claude Code, Codex, Cursor, etc.) can query it with graph-accuracy.
+It parses a codebase into a structured knowledge graph (Neo4j) and exposes that graph through a **Model Context Protocol (MCP) server**. When an AI agent (Claude Code, Codex, Cursor, etc.) needs to understand how part of a codebase works, it uses its own discovery tools to find the relevant symbol, then calls CodeLens to get the full structural context: call chains, dependencies, callers, domain cluster. The agent's LLM interprets the subgraph and synthesises the answer.
 
-The product is the **MCP server + the indexed knowledge graph**. The AI client is not our concern.
+The product is the **graph + the MCP server**. Discovery and interpretation happen in the client AI. CodeLens provides structural truth.
 
 > "We don't ask people to switch their AI tool. We make their existing AI tool dramatically smarter about their codebase."
+
+**Key architectural decisions:**
+- ADR-001: Rule interpretation is query-time (client AI reads the subgraph) — no pre-extracted Rule nodes, no index-time LLM pipeline
+- ADR-002: Code discovery is agent-led — no semantic or keyword search inside CodeLens for MVP
 
 ---
 
@@ -22,25 +26,23 @@ The product is the **MCP server + the indexed knowledge graph**. The AI client i
 
 ```
 [ Git Repository ]
- ↓
+        ↓
  [ Ingestion Layer ]
  Tree-sitter (AST parsing)
- GitPython (git history)
- ↓
+ GitPython (git history, domain clustering)
+        ↓
  [ Neo4j Graph DB ]
  Code nodes: File, Module, Class, Function, ConditionalBranch
- Rule nodes: extracted business rules (3 persona variants)
- Vector index: semantic search over all nodes
- ↓
- [ Rule Extractor ] ← background job, runs at index time
- Python + LLM API (Gemini Flash / GPT-4o-mini)
- Produces: Rule nodes with developer/product/legal variants
- ↓
+ Domain nodes: cluster summaries (community detection)
+ Edges: calls, imports, defines, contains, returns
+        ↓
  [ MCP Server ] ← THE PRODUCT
- Exposes graph as tools to any MCP-compatible agent
- ↓
- [ Client AI ] ← not our product
- Claude Code / Codex / Cursor / any MCP-compatible agent
+ Traversal-oriented tools — no search, no Rule nodes
+        ↓
+ [ Client AI ] ← not our product, does discovery + interpretation
+ Agent finds entry point (grep / file search / AST)
+ Agent calls CodeLens for structural context (subgraph)
+ Agent's LLM interprets the subgraph and answers the user
 ```
 
 ---
@@ -56,67 +58,68 @@ Tree-sitter parses the codebase into an AST. The indexer extracts:
 
 Each node is stored in Neo4j with:
 - File path and line number
-- A vector embedding (for semantic search)
 - A `stale` flag (for incremental re-indexing)
+
+No vector embeddings are generated at index time. See ADR-002.
 
 CLI: `codelens index --repo ./path`
 
 ---
 
-### Layer 2 — Business Rule Extraction (The Intelligence Layer)
+### Layer 2 — Domain Clustering (The Intelligence Layer)
 
 This is what separates CodeLens from a plain code indexer.
 
-After indexing, a background Python job traverses `ConditionalBranch` nodes, aggregates the surrounding code subgraph, and sends it to an LLM with a structured extraction prompt.
+After indexing, community detection (Leiden algorithm) runs on the code graph to identify natural clusters of related code — functions, classes, and branches that form a coherent unit. These clusters become `Domain` nodes (e.g., "Checkout", "Payments", "Auth").
 
-The output is a `Rule` node stored in Neo4j with **three pre-rendered persona fields**:
+Each `Domain` node stores:
+- `name` — human-readable domain label (LLM-assigned from cluster content)
+- `summary` — a single plain-English description of what the domain does (one LLM call per cluster)
+- `member_nodes[]` — edges to all code nodes in the cluster
 
-| Field | Description | Example |
-|---|---|---|
-| `developer_text` | Technical explanation, code references, types |"The `apply_discount()` function in `pricing.py:L142` applies a capped discount (max 20%) only when `user.is_premium == True` AND `cart.total > 500`" |
-| `product_text` | Plain English, scenario-based, zero code | "Premium users qualify for a discount of up to 20% on orders over $500." |
-| `legal_text` | Policy-clause format, audit-ready | "4.2 — A discount not exceeding 20% shall be applied to orders exceeding $500.00 placed by accounts holding Premium status." |
+This replaces the per-`ConditionalBranch` Rule extraction from the previous spec (see ADR-001). LLM runs only once per domain cluster (typically 10–20 clusters per repository) rather than once per conditional node (potentially hundreds).
 
-Every Rule node also stores:
-- `domain` tag (e.g., "Checkout", "Payments", "Auth") — assigned via semantic clustering
-- `confidence_score` — LLM confidence in the extraction
-- `source_nodes[]` — edges back to the exact code nodes this rule was derived from
-- `last_extracted_at` — for staleness tracking
-
-**Persona is a database concern, not a client AI concern.** The MCP tool accepts `persona` as a query parameter and returns the pre-rendered field. No LLM call at query time.
+**Rule interpretation is not pre-computed.** When an agent queries a domain or a function, it receives the structural subgraph. The client AI derives business rules from the subgraph in the context of the specific question being asked. Persona rendering (developer/product/legal framing) is handled by the client AI via system prompt, not by CodeLens.
 
 ---
 
 ### Layer 3 — MCP Server (The Product Surface)
 
-The MCP server exposes the graph as tools. Any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Codex) calls these tools.
+The MCP server exposes the graph as traversal tools. There is no search functionality — the agent supplies the entry point symbol name; CodeLens supplies the structural context.
 
 **Core Tools:**
 
 ```python
-search_rules(query: str, persona: str = "developer") -> list[Rule]
-# Semantic search over Rule nodes. Returns pre-rendered persona variant.
+get_code_context(symbol_name: str) -> SubGraph
+# Returns the subgraph around a function or class:
+# the node itself, its direct callees, its direct callers,
+# any ConditionalBranch nodes inside it, and their immediate callees.
+# Depth: 2-3 hops. This is the primary tool agents use.
 
-get_domain_rules(domain: str, persona: str = "developer") -> list[Rule]
-# Returns all rules tagged to a specific domain.
+get_callers(symbol_name: str) -> list[CodeNode]
+# Returns all nodes that directly call this symbol.
+# Used to understand impact: what breaks if I change this?
 
-get_rule_detail(rule_id: str, persona: str = "developer") -> Rule
-# Returns a single rule with full source traceability.
+get_callees(symbol_name: str) -> list[CodeNode]
+# Returns all nodes this symbol directly calls.
+# Used to understand dependencies.
+
+get_domain(symbol_name: str) -> Domain
+# Returns the domain cluster this symbol belongs to,
+# including the domain summary and all other member symbols.
 
 get_domains() -> list[Domain]
-# Returns all discovered domain clusters with rule counts.
+# Returns all discovered domain clusters with member counts and summaries.
+# Primary entry point for non-technical users browsing by business area.
 
-get_code_context(function_name: str) -> SubGraph
-# Returns the raw code subgraph around a function (for developers who want the raw graph).
-
-search_code(query: str) -> list[CodeNode]
-# Semantic search over raw code nodes (not rules). Full structural context.
+get_domain_content(domain_name: str) -> SubGraph
+# Returns the full subgraph of all nodes in a domain cluster.
+# Used by non-technical users querying an entire business area.
 ```
 
-**Persona parameter behavior:**
-- `"developer"` → returns `rule.developer_text` + source code references
-- `"product"` → returns `rule.product_text` only, no code references
-- `"legal"` → returns `rule.legal_text` + source file citations (for traceability)
+**There is no `persona` parameter on MCP tools.** Persona rendering is handled by the client AI's system prompt. The agent decides how to frame the response based on who it is talking to.
+
+**There is no `search_rules` or `search_code` tool.** The agent uses its own file search, grep, or AST tools to find entry points, then calls `get_code_context` to get the structural picture.
 
 ---
 
@@ -128,10 +131,13 @@ When code changes, the system re-indexes only what changed:
 |---|---|
 | Webhook / CLI trigger | Push event or `codelens index --update` |
 | File diff | Identify changed files |
-| Stale marking | Mark affected code nodes + dependent Rule nodes as stale |
+| Stale marking | Mark affected code nodes as stale |
 | Selective re-parse | Tree-sitter re-parses only changed files |
-| Rule re-extraction | LLM re-extracts only stale Rule nodes |
-| Cache invalidation | Affected MCP tool cache entries invalidated |
+| Graph update | Add, modify, or remove affected nodes and edges |
+| Domain re-cluster | Re-run community detection if structural changes are significant |
+| Domain summary refresh | Re-run LLM summary only on clusters whose membership changed |
+
+No Rule node re-extraction step exists — Rule nodes do not exist in this architecture (ADR-001).
 
 CLI: `codelens index --update --repo ./path`
 
@@ -142,17 +148,20 @@ CLI: `codelens index --update --repo ./path`
 When a PR is opened/updated:
 
 1. Check out base and head branches
-2. Run incremental indexing on head
-3. Diff Rule nodes: base vs head
-4. Classify changes: `RULE_ADDED`, `RULE_MODIFIED`, `RULE_REMOVED`
-5. Generate a plain-English impact summary (one small LLM call)
-6. Post structured comment to PR
+2. Run incremental indexing on head branch
+3. Diff the structural graph: base vs head
+4. Identify changed nodes: new functions, removed functions, modified `ConditionalBranch` nodes
+5. For changed `ConditionalBranch` nodes, retrieve the surrounding subgraph from both base and head
+6. Send both subgraphs to an LLM with a diff prompt: "describe what business logic changed between these two versions"
+7. Post the LLM-generated plain-English summary as a structured PR comment
 
 Example PR comment:
 > **Business logic changed in this PR:**
-> - **MODIFIED:** Premium discount cap raised from 15% → 20% (`pricing.py:L142`)
-> - **REMOVED:** New user grace period rule (was 30 days, now absent)
-> - **ADDED:** Bulk order rule: orders > 100 units bypass standard discount logic
+> - **MODIFIED:** `apply_discount()` — discount cap condition changed (`pricing.py:L142`)
+> - **REMOVED:** `check_grace_period()` — new user grace period logic no longer present
+> - **ADDED:** `check_bulk_order()` — new branch handling orders over 100 units
+
+This replaces the previous Rule node diff approach. The diff now operates on structural graph changes, not on pre-extracted Rule node text.
 
 CLI dry-run: `codelens simulate --base main --head feature/pricing`
 
@@ -173,7 +182,7 @@ OpenAI Agents SDK with CodeLens MCP tools registered
 Same Neo4j / MCP server underneath
 ```
 
-The persona dropdown in Streamlit passes the `persona` parameter to the MCP tool calls. No extra LLM calls — it just changes which pre-rendered field comes back.
+The persona dropdown in Streamlit sets the system prompt for the demo agent: "You are answering in Product Manager mode. Explain in plain English, avoid code references." The agent then calls the appropriate MCP traversal tools, receives the subgraph, and formats its answer accordingly. This is handled entirely by the client-side agent — not by MCP tool parameters.
 
 ---
 
@@ -181,7 +190,7 @@ The persona dropdown in Streamlit passes the `persona` parameter to the MCP tool
 
 ### Key Design Decision: Roles and Personas Are Separate Concerns
 
-**Personas** (`developer`, `product`, `legal`) are purely a **UX / presentation preference**. Any authenticated user can freely select any persona. Personas carry no security enforcement — they are just a parameter that selects which pre-rendered field to return from Neo4j.
+**Personas** (`developer`, `product`, `legal`) are purely a **UX / presentation preference** handled by the client AI's system prompt. They are not parameters on MCP tools and are not stored in the database. Any authenticated user can request any persona framing.
 
 **Roles** (`user`, `admin`) are **security roles** that control access to system management functions. They are independent of persona.
 
@@ -228,22 +237,22 @@ A separate admin-only UI for managing the CodeLens system. Satisfies CRUD and RB
 | Operation | Action |
 |---|---|
 | **Create** | Register a new repository (GitHub URL + paths to monitor) |
-| **Read** | Browse indexed repos, Rule nodes with confidence scores, job history |
-| **Update** | Trigger full or incremental re-index, manually edit a Rule node's text, mark as `human_verified` |
-| **Delete** | Remove a repository from the index, delete an incorrectly extracted Rule node |
+| **Read** | Browse indexed repos, domain clusters with summaries, indexing job history |
+| **Update** | Trigger full or incremental re-index, manually edit a domain summary, re-run community detection |
+| **Delete** | Remove a repository from the index |
 
 ### User Management (Admin)
 - List all users and their roles
 - Promote a user to admin
 - Revoke access / delete user
 
-### Rule Correction Flow
-When the LLM extracts a rule incorrectly, an admin can:
-1. Open the rule in the admin panel
-2. Edit any of the three persona text fields directly
-3. Save with `human_verified: true` flag
+### Domain Summary Correction Flow
+If the LLM generates an inaccurate domain summary, an admin can:
+1. Open the domain in the admin panel
+2. Edit the summary text directly
+3. Save with a `human_verified: true` flag
 
-This builds trust in the knowledge base over time and provides a feedback loop for improving extraction prompts.
+Individual function-level rule correction is not applicable — function-level rules are not pre-stored; they are interpreted at query time by the client AI.
 
 ---
 
@@ -254,8 +263,8 @@ This builds trust in the knowledge base over time and provides a feedback loop f
 |---|---|
 | AST Parsing | Tree-sitter (Python, TypeScript — MVP languages) |
 | Graph Database | Neo4j AuraDB Free |
-| Vector Search | Neo4j built-in vector index |
-| Rule Extractor | Python + Gemini 2.0 Flash (free tier) |
+| Community Detection | graspologic (Leiden algorithm) — Python library, no external service |
+| Domain Summarisation | Python + Gemini 2.0 Flash (free tier) — runs once per cluster at index time |
 | Background Jobs | Python `BackgroundTasks` (FastAPI) or simple Celery (if needed) |
 | MCP Server | Python MCP SDK (`mcp` package) |
 | API Backend | FastAPI |
@@ -279,9 +288,12 @@ This builds trust in the knowledge base over time and provides a feedback loop f
 ## What Is Out of Scope
 
 - Custom chatbot UI (not our product)
-- Persona rendering logic at query time (pre-rendered at index time)
+- Pre-extracted Rule nodes with index-time LLM extraction (see ADR-001)
+- Vector embeddings and vector index (see ADR-002)
+- Semantic or keyword search inside CodeLens (see ADR-002)
+- Persona parameter on MCP tools (persona is a client AI system prompt concern)
 - LangGraph for query orchestration (dropped, no runtime agent needed)
-- Separate vector database (Neo4j handles this natively)
+- Separate vector database
 - Full Next.js production dashboard (Streamlit demo is sufficient for MVP)
 - Redis / Celery for MVP (use FastAPI BackgroundTasks first)
 - Role-based persona enforcement (personas are free UX parameters, not security gates)
@@ -292,38 +304,41 @@ This builds trust in the knowledge base over time and provides a feedback loop f
 
 ### Phase 1 — Core Graph (Weeks 1–2)
 - Tree-sitter parsing pipeline for Python and TypeScript
-- Neo4j schema implementation
-- Entity and edge extraction working
+- Neo4j schema: File, Module, Class, Function, ConditionalBranch nodes with all edges
+- Entity and edge extraction working end-to-end
 - CLI indexer running on a real repository
+- Leiden community detection producing Domain clusters
 
-**Gate:** A real codebase indexed into Neo4j with queryable graph structure.
+**Gate:** A real codebase indexed into Neo4j with queryable graph structure and domain clusters visible.
 
-### Phase 2 — Rule Extraction (Weeks 3–4)
-- LLM extraction pipeline for `ConditionalBranch` traversal
-- Rule node creation with all three persona fields
-- Domain clustering via semantic similarity
-- Confidence scoring
-
-**Gate:** Rule nodes visible in Neo4j with developer/product/legal variants populated.
-
-### Phase 3 — MCP Server (Weeks 5–6)
-- All core MCP tools implemented
+### Phase 2 — Domain Summaries and MCP Server (Weeks 3–4)
+- Domain summary generation: one LLM call per cluster producing plain-English Domain node summaries
+- All core MCP traversal tools implemented (`get_code_context`, `get_callers`, `get_callees`, `get_domain`, `get_domains`, `get_domain_content`)
 - Tested end-to-end with Claude Desktop and Claude Code
 - Incremental re-indexing pipeline working
-- CLI search and simulate commands
+- CLI simulate command
 
-**Gate:** Claude Code can query the indexed codebase and receive persona-appropriate rule explanations.
+**Gate:** Claude Code can call `get_code_context("apply_discount")` and receive a subgraph it can interpret accurately.
 
-### Phase 4 — Auth, Admin Panel + Demo (Weeks 7–8)
+### Phase 3 — Auth, Admin Panel + Demo (Weeks 5–6)
 - FastAPI auth endpoints (register, login, logout, JWT issuance)
 - MCP server JWT validation middleware
-- Admin panel: repo CRUD, rule editing, user management
-- Streamlit demo UI with login + persona dropdown
+- Admin panel: repo CRUD, domain summary editing, user management
+- Streamlit demo UI with login + persona system prompt toggle
 - GitHub webhook integration
 - PR diff logic and automated comment posting
-- End-to-end demo on a live pull request
 
-**Gate:** Full authenticated demo ready for stakeholder presentation. Admin can manage repos and correct rules. Users can query via MCP and demo UI.
+**Gate:** Full authenticated demo ready. Admin can manage repos and domain summaries. Users can query via MCP and Streamlit demo UI.
+
+### Phase 4 — Testing, Documentation and Presentation (Weeks 7–8)
+- pytest suite targeting 70%+ coverage on indexer and MCP tools
+- Integration tests: index sample repo, assert domain clusters and subgraph queries
+- `docs/setup.md`, `docs/user-guide.md`, `docs/api.md`
+- `docs/data-model.md` with Mermaid Neo4j schema diagram
+- Final report derived from living spec
+- Demo script and presentation
+
+**Gate:** All course requirements met. Demo rehearsed. Submitted.
 
 ---
 
@@ -332,18 +347,32 @@ This builds trust in the knowledge base over time and provides a feedback loop f
 | Metric | Target |
 |---|---|
 | Indexing speed | < 5 min for 100k LOC |
-| Rule extraction accuracy | > 90% precision on human-validated sample |
-| MCP query latency | < 2 sec for rule search |
+| Domain clustering accuracy | Clusters are coherent and labelled correctly on manual review |
+| MCP subgraph query latency | < 2 sec for `get_code_context` |
 | PR simulation latency | < 45 sec from push to posted comment |
+| Test coverage | > 70% on indexer and MCP server |
 | Demo cost | $0–5/month (free-tier infrastructure) |
 
 ---
 
 ## Open Questions
 
-1. **Rule extraction granularity:** Do we extract one Rule per `ConditionalBranch`, or group related branches into a single Rule? (Significant impact on rule count and quality.)
-2. **Language priority:** Python + TypeScript for MVP confirmed. Java or Go next?
-3. **Webhook vs polling:** GitHub webhook requires a public server. For local dev, do we support `codelens index --watch` polling as fallback?
-4. **Multi-repo:** Does a single CodeLens instance index one repo or many? MVP scope should be single-repo.
-5. **Auth upgrade path:** MVP uses username/password + JWT. Is GitHub OAuth the right upgrade for v2 given the developer-first audience?
-6. **Admin UI technology:** Streamlit admin page vs minimal FastAPI + HTML — which is faster to build and maintain?
+1. **Domain clustering quality:** Leiden community detection is unsupervised — cluster boundaries may not align with business domain boundaries. How do we validate and correct poor clusters without manual intervention?
+2. **Subgraph depth:** The `get_code_context` tool returns a 2-3 hop subgraph. What is the right depth before the returned context becomes too large to be useful?
+3. **Language priority:** Python + TypeScript for MVP confirmed. Java or Go next?
+4. **Webhook vs polling:** GitHub webhook requires a public server. For local dev, do we support `codelens index --watch` polling as fallback?
+5. **Multi-repo:** Does a single CodeLens instance index one repo or many? MVP scope should be single-repo.
+6. **Auth upgrade path:** MVP uses username/password + JWT. Is GitHub OAuth the right upgrade for v2 given the developer-first audience?
+7. **Admin UI technology:** Streamlit admin page vs minimal FastAPI + HTML — which is faster to build and maintain?
+8. **PR simulator entry point:** Without pre-extracted Rule nodes, the PR diff now compares structural subgraphs. How do we scope which changed nodes to include in the diff prompt to keep it within LLM context limits?
+
+---
+
+## Architectural Decision Records
+
+Key design decisions are documented in `docs/decisions/`:
+
+| ADR | Decision |
+|---|---|
+| [ADR-001](decisions/ADR-001-rule-interpretation-strategy.md) | Rule interpretation is query-time (client AI reads subgraph) — no index-time LLM rule extraction |
+| [ADR-002](decisions/ADR-002-code-discovery-strategy.md) | Code discovery is agent-led — no semantic or keyword search inside CodeLens for MVP |
