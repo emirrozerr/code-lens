@@ -1,124 +1,104 @@
 # CodeLens
 
-**GraphRAG-Powered Code Intelligence Infrastructure**
+**Code Intelligence Infrastructure for AI Agents**
 
-> Status: Pre-development — specification complete, implementation not yet started.
+> Status: In development -- project skeleton and architecture complete, Phase 1 implementation starting.
 
-CodeLens indexes your codebase into a structured knowledge graph, extracts business rules using LLM preprocessing, and exposes everything through a **Model Context Protocol (MCP) server** — so your existing AI agents (Claude Code, Codex, Cursor) can query your codebase with graph-level accuracy.
+CodeLens indexes your codebase into a structured knowledge graph and exposes it through a **Model Context Protocol (MCP) server** -- so your existing AI agents (Claude Code, Cursor, Copilot) can query your codebase with graph-level structural accuracy.
 
 **The product is the MCP server + the knowledge graph.** Not a chatbot. Not another AI tool. An intelligence layer that makes your existing AI tools dramatically smarter about your codebase.
 
 ---
 
-## What It Does
+## How It Works
 
-1. **Indexes your codebase as a structured graph** — functions, classes, call chains, conditional branches, all linked with precise relationships in Neo4j.
-2. **Extracts business rules automatically** — a background LLM pipeline reads the graph and produces plain-English rule statements, stored back in the database with full code traceability.
-3. **Serves those rules through MCP** — any MCP-compatible agent can call `search_rules("discount logic")` and get back accurate, graph-grounded, pre-rendered rule context.
-4. **Supports persona-aware retrieval** — every rule is pre-rendered at index time in three variants: Developer (technical), Product (plain English), Legal (policy clause). The client AI requests which persona it needs.
-5. **Detects business logic changes in PRs** — diffs rule subgraphs between branches and posts structured impact summaries directly to the PR.
-
----
-
-## Who Uses It and How
-
-| Audience | Interface | How they use CodeLens |
-|---|---|---|
-| Software Engineers | Claude Code / Cursor / any MCP client | Agent queries CodeLens MCP tools for accurate context before writing or changing code |
-| Product Managers | Streamlit demo UI (persona: product) | Ask natural language questions, receive business behavior explanations with zero code |
-| Compliance / Legal | Streamlit demo UI (persona: legal) | Browse rules as policy clauses, export to PDF for audit packages |
-| Admins | Admin Panel | Manage indexed repositories, edit extracted rules, manage user accounts |
+1. **Indexes your codebase as a structured graph** -- functions, classes, call chains, conditional branches, all linked with precise relationships in Neo4j.
+2. **Identifies business domains automatically** -- a community detection algorithm clusters related code into domains. A single LLM call per domain generates a human-readable name, summary, and observed business rules.
+3. **Serves structural context through MCP** -- any MCP-compatible agent can call `get_code_context("apply_discount")` and get back a multi-hop subgraph of callers, callees, conditionals, and the domain it belongs to.
+4. **Agent-led discovery** -- the AI agent uses its own tools (grep, file search, etc.) to find entry points, then calls CodeLens for structural context. CodeLens does not do search -- it provides the graph intelligence layer (see [ADR-002](docs/decisions/ADR-002-code-discovery-strategy.md)).
+5. **Query-time interpretation** -- business rule synthesis is performed by the client AI at query time, not pre-computed at index time (see [ADR-001](docs/decisions/ADR-001-rule-interpretation-strategy.md)).
 
 ---
 
 ## Prerequisites
 
 - Python 3.11+
-- Neo4j AuraDB account (free tier sufficient for development)
-- An LLM API key — Gemini (free tier) or OpenAI
+- Docker (for local Neo4j)
+- A Gemini API key (free tier sufficient -- [get one here](https://aistudio.google.com/apikey))
 - Git
 
 ---
 
 ## Getting Started
 
-> Setup instructions are in progress. The project is in the pre-development phase.
-
 ```bash
 # Clone the repository
 git clone https://github.com/emirrozerr/code-lens.git
 cd code-lens
 
+# Set up environment
+cp .env.example .env
+# Edit .env with your Gemini API key
+
+# Start Neo4j
+docker compose up -d
+
+# Install in development mode
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
 # (Coming in Phase 1) Index a repository
-codelens index --repo ./path/to/your/repo
-
-# (Coming in Phase 3) Search business rules
-codelens search "discount rules"
-
-# (Coming in Phase 4) Dry-run PR diff
-codelens simulate --base main --head feature/my-branch
+python -m codelens.indexer ./path/to/your/repo
 ```
 
 ---
 
-## Core MCP Tools
+## Project Structure
 
-Once the MCP server is configured in your AI client, the following tools become available:
-
-```python
-search_rules(query, persona="developer")    # Semantic search over extracted Rule nodes
-get_domain_rules(domain, persona)           # All rules for a domain (e.g. "Payments")
-get_rule_detail(rule_id, persona)           # Single rule with full code traceability
-get_domains()                               # All discovered business domains
-search_code(query)                          # Semantic search over raw code graph
-get_code_context(function_name)             # Structural subgraph around a function
+```
+src/codelens/
+  indexer/        Tree-sitter parsing, AST walking, node and edge extraction
+  graph/          Neo4j connection, schema management, Cypher queries
+  mcp_server/     MCP tool handlers for code graph traversal
+  api/            FastAPI app (auth endpoints, admin routes, index triggers)
+  settings.py     Central configuration loaded from .env
+tests/
+  unit/           Unit tests
+  integration/    Integration tests (requires Neo4j)
+docs/             Living spec, ADRs, requirements, data model
 ```
 
 ---
 
-## Persona Retrieval
+## MCP Tools
 
-Persona is a database concern, not a client AI concern. Rules are pre-rendered into three variants at index time. The MCP tool accepts `persona` as a parameter and returns the pre-stored field — no extra LLM call at query time.
+Once the MCP server is running and configured in your AI client, these tools become available:
 
-| Persona | Content |
+| Tool | Description |
 |---|---|
-| `developer` | Technical rule + code file/line references + call chain context |
-| `product` | Plain English explanation + example scenarios, no code |
-| `legal` | Numbered policy clause + source file citations |
+| `get_code_context(symbol)` | Multi-hop subgraph around a function or class -- callers, callees, conditionals, domain |
+| `get_callers(symbol)` | All functions that call the given symbol |
+| `get_callees(symbol)` | All functions called by the given symbol |
+| `get_domain(symbol)` | The business domain a symbol belongs to, with summary |
+| `get_domains()` | All discovered business domains with names and summaries |
+| `get_domain_content(domain)` | All functions and classes in a domain cluster |
 
 ---
 
 ## Tech Stack
 
-**Core (The Product)**
-
 | Component | Technology |
 |---|---|
 | AST Parsing | Tree-sitter (Python + TypeScript) |
-| Graph Database | Neo4j AuraDB |
-| Rule Extractor | Python + Gemini 2.0 Flash (background job) |
+| Graph Database | Neo4j (local via Docker, production via AuraDB) |
+| Community Detection | Leiden algorithm (Neo4j GDS or graspologic) |
+| Domain Summaries | Google Gemini Flash (one call per domain cluster) |
 | MCP Server | Python MCP SDK |
-| API Backend | FastAPI |
-| CLI | Python Click |
-
-**Demo and Admin UI (not the core product)**
-
-| Component | Technology |
-|---|---|
-| Demo Chat UI | Streamlit |
-| Admin Panel | Streamlit |
-| Demo Agent | OpenAI Agents SDK |
-
----
-
-## Development Phases
-
-| Phase | Scope | Weeks | Gate |
-|---|---|---|---|
-| 1 — Core Graph | Tree-sitter parsing, Neo4j schema, CLI indexer | 1–2 | Real codebase queryable in Neo4j |
-| 2 — Rule Extraction | LLM extraction pipeline, Rule nodes, persona fields, domain clustering | 3–4 | Rule nodes with all three persona variants in Neo4j |
-| 3 — MCP Server | All MCP tools, JWT auth, incremental re-indexing, CLI search | 5–6 | Claude Code querying the graph end-to-end |
-| 4 — Auth, Admin + Demo | Auth endpoints, admin panel CRUD, Streamlit demo, PR simulator | 7–8 | Full authenticated demo ready |
+| API Backend | FastAPI + JWT auth |
 
 ---
 
@@ -126,8 +106,20 @@ Persona is a database concern, not a client AI concern. Rules are pre-rendered i
 
 | Document | Description |
 |---|---|
-| [docs/LIVING_SPEC.md](docs/LIVING_SPEC.md) | Full living specification — architecture, data model, auth, admin panel, tech stack |
-| [docs/requirements-alignment.md](docs/requirements-alignment.md) | All course requirements mapped to the project with alignment status and action plan |
-| [docs/multi-tier-project-requirements.md](docs/multi-tier-project-requirements.md) | Multi-Tier Application course requirements |
-| [docs/Team-application-project-requirements.md](docs/Team-application-project-requirements.md) | Team Application Project course requirements |
-| [docs/CodeLens_Project_Specification.md](docs/CodeLens_Project_Specification.md) | Original project specification (v1.0, superseded) |
+| [LIVING_SPEC.md](docs/LIVING_SPEC.md) | Full living specification -- architecture, data model, auth, phases |
+| [ADR-001](docs/decisions/ADR-001-rule-interpretation-strategy.md) | Rule interpretation is query-time, not index-time |
+| [ADR-002](docs/decisions/ADR-002-code-discovery-strategy.md) | Code discovery is agent-led, no internal search |
+| [ADR-003](docs/decisions/ADR-003-presentation-tier-strategy.md) | Presentation tier strategy (proposed, not yet decided) |
+| [Requirements Alignment](docs/requirements-alignment.md) | Course requirements mapped to project design |
+
+---
+
+## Development Phases
+
+| Phase | Scope | Priority |
+|---|---|---|
+| 1 -- Core Graph | Tree-sitter parsing, Neo4j schema, full re-index | P0 |
+| 2 -- Intelligence | Domain clustering (Leiden), LLM domain summaries | P0 |
+| 3 -- MCP Server | All six traversal tools, end-to-end testing | P0 |
+| 4 -- Auth + UI | JWT auth, admin panel, demo interface | P1 |
+| 5 -- Testing + Docs | pytest suite, CI, documentation, final report | P1 |
