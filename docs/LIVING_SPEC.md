@@ -376,3 +376,4 @@ Key design decisions are documented in `docs/decisions/`:
 |---|---|
 | [ADR-001](decisions/ADR-001-rule-interpretation-strategy.md) | Rule interpretation is query-time (client AI reads subgraph) — no index-time LLM rule extraction |
 | [ADR-002](decisions/ADR-002-code-discovery-strategy.md) | Code discovery is agent-led — no semantic or keyword search inside CodeLens for MVP |
+| [ADR-003](decisions/ADR-003-presentation-tier-strategy.md) | Presentation tier strategy — Streamlit vs separate HTML/JS frontend (PROPOSED, not yet decided) |
