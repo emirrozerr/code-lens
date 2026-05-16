@@ -181,6 +181,32 @@ def ingest(repo_path: str, verbose: bool, clear: bool):
             traceback.print_exc()
 
 # ---------------------------------------------------------------------------
+# mcp command
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+def mcp(verbose: bool):
+    """Start the Model Context Protocol (MCP) server for CodeLens.
+    
+    This exposes the Neo4j graph database to AI agents using standard tools.
+    """
+    _setup_logging(verbose)
+    from codelens.mcp_server.server import mcp as mcp_server
+    
+    click.echo("\n  CodeLens MCP Server")
+    click.echo(f"  {'─' * 40}")
+    click.echo("  Starting FastMCP on stdio...\n")
+    
+    try:
+        mcp_server.run()
+    except Exception as e:
+        click.secho(f"\n  ✖ Server failed: {e}", fg="red")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+
+# ---------------------------------------------------------------------------
 # Pretty printing
 # ---------------------------------------------------------------------------
 
