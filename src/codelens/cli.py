@@ -186,7 +186,10 @@ def ingest(repo_path: str, verbose: bool, clear: bool):
 
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
-def mcp(verbose: bool):
+@click.option("--transport", type=click.Choice(["stdio", "sse"]), default="stdio", help="Transport protocol to use.")
+@click.option("--host", default="127.0.0.1", help="Host binding for SSE server.")
+@click.option("--port", default=8000, type=int, help="Port for SSE server.")
+def mcp(verbose: bool, transport: str, host: str, port: int):
     """Start the Model Context Protocol (MCP) server for CodeLens.
     
     This exposes the Neo4j graph database to AI agents using standard tools.
@@ -196,10 +199,22 @@ def mcp(verbose: bool):
     
     click.echo("\n  CodeLens MCP Server")
     click.echo(f"  {'─' * 40}")
-    click.echo("  Starting FastMCP on stdio...\n")
     
     try:
-        mcp_server.run()
+        if transport == "sse":
+            click.echo(f"  Starting FastMCP on SSE ({host}:{port})...")
+            click.echo(f"  SSE Endpoint: http://{host}:{port}/sse\n")
+            mcp_server.settings.host = host
+            mcp_server.settings.port = port
+            
+            # Allow all origins for local Docker access
+            mcp_server.settings.transport_security.enable_dns_rebinding_protection = False
+            mcp_server.settings.transport_security.allowed_origins = ["*"]
+            mcp_server.settings.transport_security.allowed_hosts = ["*"]
+            mcp_server.run(transport="sse")
+        else:
+            click.echo("  Starting FastMCP on stdio...\n")
+            mcp_server.run()
     except Exception as e:
         click.secho(f"\n  ✖ Server failed: {e}", fg="red")
         if verbose:
