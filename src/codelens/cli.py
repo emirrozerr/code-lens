@@ -129,6 +129,58 @@ def watch(repo_path: str, verbose: bool):
 
 
 # ---------------------------------------------------------------------------
+# ingest command
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("repo_path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+@click.option("--clear", is_flag=True, help="Clear the Neo4j database before ingesting.")
+def ingest(repo_path: str, verbose: bool, clear: bool):
+    """Parse a repository and ingest it into the Neo4j graph database.
+
+    REPO_PATH is the path to the repository root.
+    """
+    _setup_logging(verbose)
+    from codelens.indexer.indexer import Indexer
+    from codelens.graph.neo4j_client import Neo4jClient
+
+    repo = Path(repo_path)
+    click.echo(f"\n  CodeLens Ingestion")
+    click.echo(f"  {'─' * 40}")
+    click.echo(f"  Repository:  {repo}")
+
+    # 1. Parse
+    click.echo("\n  1. Parsing repository...")
+    indexer = Indexer()
+    result = indexer.index_repository(repo)
+
+    if not result.nodes:
+        click.echo("  ℹ  No parseable files found. Aborting ingestion.")
+        return
+
+    # 2. Ingest
+    click.echo("\n  2. Connecting to Neo4j...")
+    try:
+        client = Neo4jClient()
+        if clear:
+            click.echo("  [!] Clearing database...")
+            client.clear_database()
+            
+        client.setup_schema()
+        
+        click.echo(f"  [+] Ingesting {len(result.nodes)} nodes and {len(result.edges)} edges...")
+        client.ingest_parse_result(result)
+        client.close()
+        
+        click.echo("\n  ✓ Ingestion complete!")
+    except Exception as e:
+        click.secho(f"\n  ✖ Ingestion failed: {e}", fg="red")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+
+# ---------------------------------------------------------------------------
 # Pretty printing
 # ---------------------------------------------------------------------------
 
