@@ -20,5 +20,16 @@ build/
 .env.local
 .env.*.local
 
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Testing — cloned external repos used as fixtures
+tests/fixtures/spring-petclinic/
+
+# pytest cache
+.pytest_cache/
+
 # Temporary files
 /tmp/

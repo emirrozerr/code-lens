@@ -18,7 +18,7 @@ The product is the **graph + the MCP server**. Discovery and interpretation happ
 
 **Key architectural decisions:**
 - ADR-001: Rule interpretation is query-time (client AI reads the subgraph) — no pre-extracted Rule nodes, no index-time LLM pipeline
-- ADR-002: Code discovery is agent-led — no semantic or keyword search inside CodeLens for MVP
+- ADR-002: Code discovery is a hybrid approach — agent-led discovery supplemented by a Neo4j Lucene full-text search fallback (`search_nodes`).
 
 ---
 
@@ -37,7 +37,7 @@ The product is the **graph + the MCP server**. Discovery and interpretation happ
  Edges: calls, imports, defines, contains, returns
         ↓
  [ MCP Server ] ← THE PRODUCT
- Traversal-oriented tools — no search, no Rule nodes
+ Traversal-oriented tools + lightweight Lucene full-text search
         ↓
  [ Client AI ] ← not our product, does discovery + interpretation
  Agent finds entry point (grep / file search / AST)
@@ -85,11 +85,15 @@ This replaces the per-`ConditionalBranch` Rule extraction from the previous spec
 
 ### Layer 3 — MCP Server (The Product Surface)
 
-The MCP server exposes the graph as traversal tools. There is no search functionality — the agent supplies the entry point symbol name; CodeLens supplies the structural context.
+The MCP server exposes the graph primarily as traversal tools, alongside a native Lucene full-text search fallback (`search_nodes`) to help agents find initial entry points.
 
 **Core Tools:**
 
 ```python
+search_nodes(keyword: str) -> list[CodeNode]
+# Native Lucene full-text search on node names, docstrings, and file paths.
+# Used by the agent to find an entry point when native file search is insufficient.
+
 get_code_context(symbol_name: str) -> SubGraph
 # Returns the subgraph around a function or class:
 # the node itself, its direct callees, its direct callers,
@@ -119,7 +123,7 @@ get_domain_content(domain_name: str) -> SubGraph
 
 **There is no `persona` parameter on MCP tools.** Persona rendering is handled by the client AI's system prompt. The agent decides how to frame the response based on who it is talking to.
 
-**There is no `search_rules` or `search_code` tool.** The agent uses its own file search, grep, or AST tools to find entry points, then calls `get_code_context` to get the structural picture.
+**There is no vector or semantic search tool.** The agent uses its own file search, grep, or the native `search_nodes` Lucene tool to find entry points, then calls `get_code_context` to get the structural picture.
 
 ---
 
@@ -129,7 +133,7 @@ When code changes, the system re-indexes only what changed:
 
 | Step | Action |
 |---|---|
-| Webhook / CLI trigger | Push event or `codelens index --update` |
+| Trigger | File saved (local `watchdog` daemon), Push event (webhook), or `codelens index --update` |
 | File diff | Identify changed files |
 | Stale marking | Mark affected code nodes as stale |
 | Selective re-parse | Tree-sitter re-parses only changed files |
@@ -140,6 +144,7 @@ When code changes, the system re-indexes only what changed:
 No Rule node re-extraction step exists — Rule nodes do not exist in this architecture (ADR-001).
 
 CLI: `codelens index --update --repo ./path`
+Daemon: `codelens watch --repo ./path` (Background local file watcher)
 
 ---
 
@@ -261,7 +266,7 @@ Individual function-level rule correction is not applicable — function-level r
 ### Core (The Product)
 | Component | Technology |
 |---|---|
-| AST Parsing | Tree-sitter (Python, TypeScript — MVP languages) |
+| AST Parsing | Tree-sitter (Java — MVP language) |
 | Graph Database | Neo4j AuraDB Free |
 | Community Detection | graspologic (Leiden algorithm) — Python library, no external service |
 | Domain Summarisation | Python + Gemini 2.0 Flash (free tier) — runs once per cluster at index time |
@@ -290,7 +295,7 @@ Individual function-level rule correction is not applicable — function-level r
 - Custom chatbot UI (not our product)
 - Pre-extracted Rule nodes with index-time LLM extraction (see ADR-001)
 - Vector embeddings and vector index (see ADR-002)
-- Semantic or keyword search inside CodeLens (see ADR-002)
+- Vector-based semantic search inside CodeLens (we use native Lucene keyword search instead — see ADR-002)
 - Persona parameter on MCP tools (persona is a client AI system prompt concern)
 - LangGraph for query orchestration (dropped, no runtime agent needed)
 - Separate vector database
@@ -303,7 +308,7 @@ Individual function-level rule correction is not applicable — function-level r
 ## Development Phases (Revised)
 
 ### Phase 1 — Core Graph (Weeks 1–2)
-- Tree-sitter parsing pipeline for Python and TypeScript
+- Tree-sitter parsing pipeline for Java
 - Neo4j schema: File, Module, Class, Function, ConditionalBranch nodes with all edges
 - Entity and edge extraction working end-to-end
 - CLI indexer running on a real repository
@@ -359,7 +364,7 @@ Individual function-level rule correction is not applicable — function-level r
 
 1. **Domain clustering quality:** Leiden community detection is unsupervised — cluster boundaries may not align with business domain boundaries. How do we validate and correct poor clusters without manual intervention?
 2. **Subgraph depth:** The `get_code_context` tool returns a 2-3 hop subgraph. What is the right depth before the returned context becomes too large to be useful?
-3. **Language priority:** Python + TypeScript for MVP confirmed. Java or Go next?
+3. **Language priority:** Java for MVP confirmed. Python or TypeScript next?
 4. **Webhook vs polling:** GitHub webhook requires a public server. For local dev, do we support `codelens index --watch` polling as fallback?
 5. **Multi-repo:** Does a single CodeLens instance index one repo or many? MVP scope should be single-repo.
 6. **Auth upgrade path:** MVP uses username/password + JWT. Is GitHub OAuth the right upgrade for v2 given the developer-first audience?
