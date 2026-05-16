@@ -104,6 +104,31 @@ def index(repo_path: str, verbose: bool, stats: bool, output: str | None):
 
 
 # ---------------------------------------------------------------------------
+# watch command
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("repo_path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+def watch(repo_path: str, verbose: bool):
+    """Start a background daemon to incrementally index a repository.
+
+    REPO_PATH is the path to the repository root to watch.
+    """
+    _setup_logging(verbose)
+    from codelens.watcher import WatcherDaemon
+
+    repo = Path(repo_path)
+    click.echo(f"\n  CodeLens Watcher")
+    click.echo(f"  {'─' * 40}")
+    click.echo(f"  Watching:  {repo}")
+    click.echo("  Press Ctrl+C to stop.\n")
+
+    daemon = WatcherDaemon(repo)
+    daemon.start()
+
+
+# ---------------------------------------------------------------------------
 # Pretty printing
 # ---------------------------------------------------------------------------
 

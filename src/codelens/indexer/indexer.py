@@ -80,6 +80,86 @@ class Indexer:
 
         return combined
 
+    def index_incremental(
+        self,
+        repo_path: Path,
+        previous_result: ParseResult,
+        changed_files: list[Path],
+        deleted_files: list[Path],
+    ) -> ParseResult:
+        """Incrementally update a previous ParseResult with changed/deleted files.
+
+        Args:
+            repo_path: Absolute path to the repository root.
+            previous_result: The result of the last index run.
+            changed_files: List of absolute paths to files that were modified or added.
+            deleted_files: List of absolute paths to files that were deleted.
+
+        Returns:
+            A new ParseResult with the updated graph state.
+        """
+        import copy
+
+        repo_path = repo_path.resolve()
+        start = time.time()
+
+        # 1. Start with a copy of the previous state
+        new_result = copy.deepcopy(previous_result)
+
+        # 2. Determine which relative file paths need to be purged
+        files_to_purge = set()
+        for f in changed_files + deleted_files:
+            try:
+                rel = str(f.resolve().relative_to(repo_path))
+                files_to_purge.add(rel)
+            except ValueError:
+                continue
+
+        if not files_to_purge:
+            return new_result
+
+        # 3. Remove old nodes and edges from the purged files
+        new_result.nodes = [n for n in new_result.nodes if n.filepath not in files_to_purge]
+        new_result.edges = [e for e in new_result.edges if e.filepath not in files_to_purge]
+
+        # 4. Parse the newly changed/added files
+        files_parsed = 0
+        for source_file in changed_files:
+            if not source_file.is_file():
+                continue
+            
+            ext = source_file.suffix.lower()
+            lang = SUPPORTED_EXTENSIONS.get(ext)
+
+            if lang == "java":
+                try:
+                    file_result = self._java_parser.parse_file(source_file, repo_path)
+                    new_result.nodes.extend(file_result.nodes)
+                    new_result.edges.extend(file_result.edges)
+                    new_result.errors.extend(file_result.errors)
+                    files_parsed += 1
+                except Exception as exc:
+                    msg = f"Failed to parse {source_file}: {exc}"
+                    logger.warning(msg)
+                    new_result.errors.append(msg)
+
+        elapsed = time.time() - start
+
+        # 5. Re-resolve calls (since new methods might have been added)
+        # Note: we only try to resolve calls that are still marked as "unresolved:"
+        self._resolve_calls(new_result)
+
+        logger.info(
+            "Incremental update: %d files parsed, %d deleted, %d nodes, %d edges (%.2fs)",
+            files_parsed,
+            len(deleted_files),
+            len(new_result.nodes),
+            len(new_result.edges),
+            elapsed,
+        )
+
+        return new_result
+
     def _discover_files(self, repo_path: Path):
         """Yield all source files in the repository, skipping hidden dirs and common junk."""
         skip_dirs = {
