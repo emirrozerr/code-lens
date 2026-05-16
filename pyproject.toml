@@ -13,8 +13,10 @@ license = {text = "MIT"}
 dependencies = [
     # AST parsing
     "tree-sitter>=0.23",
-    "tree-sitter-python>=0.23",
-    "tree-sitter-typescript>=0.23",
+    "tree-sitter-java>=0.23",
+
+    # CLI
+    "click>=8.1",
 
     # Graph database
     "neo4j>=5.0",
@@ -46,6 +48,9 @@ dev = [
     "ruff>=0.6",
     "httpx>=0.27",
 ]
+
+[project.scripts]
+codelens = "codelens.cli:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
