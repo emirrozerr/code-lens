@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from codelens.indexer.java_parser import JavaParser
+from codelens.indexer.python_parser import PythonParser
 from codelens.indexer.models import CodeEdge, CodeNode, EdgeType, NodeType, ParseResult
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 # File extensions to their parser
 SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".java": "java",
+    ".py": "python",
 }
 
 
@@ -26,6 +28,7 @@ class Indexer:
 
     def __init__(self) -> None:
         self._java_parser = JavaParser()
+        self._python_parser = PythonParser()
 
     def index_repository(self, repo_path: Path) -> ParseResult:
         """Index an entire repository, returning a combined ParseResult.
@@ -52,6 +55,18 @@ class Indexer:
             if lang == "java":
                 try:
                     file_result = self._java_parser.parse_file(source_file, repo_path)
+                    combined.nodes.extend(file_result.nodes)
+                    combined.edges.extend(file_result.edges)
+                    combined.errors.extend(file_result.errors)
+                    files_parsed += 1
+                except Exception as exc:
+                    msg = f"Failed to parse {source_file}: {exc}"
+                    logger.warning(msg)
+                    combined.errors.append(msg)
+                    files_skipped += 1
+            elif lang == "python":
+                try:
+                    file_result = self._python_parser.parse_file(source_file, repo_path)
                     combined.nodes.extend(file_result.nodes)
                     combined.edges.extend(file_result.edges)
                     combined.errors.extend(file_result.errors)
@@ -142,6 +157,17 @@ class Indexer:
                     msg = f"Failed to parse {source_file}: {exc}"
                     logger.warning(msg)
                     new_result.errors.append(msg)
+            elif lang == "python":
+                try:
+                    file_result = self._python_parser.parse_file(source_file, repo_path)
+                    new_result.nodes.extend(file_result.nodes)
+                    new_result.edges.extend(file_result.edges)
+                    new_result.errors.extend(file_result.errors)
+                    files_parsed += 1
+                except Exception as exc:
+                    msg = f"Failed to parse {source_file}: {exc}"
+                    logger.warning(msg)
+                    new_result.errors.append(msg)
 
         elapsed = time.time() - start
 
@@ -163,7 +189,7 @@ class Indexer:
     def _discover_files(self, repo_path: Path):
         """Yield all source files in the repository, skipping hidden dirs and common junk."""
         skip_dirs = {
-            ".git", ".svn", ".hg", "node_modules", "__pycache__",
+            ".git", ".svn", ".hg", "node_modules", "__pycache__", ".venv", "venv",
             ".idea", ".vscode", ".settings", "target", "build", "out", "bin",
         }
 
