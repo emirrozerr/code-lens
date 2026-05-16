@@ -136,7 +136,8 @@ def watch(repo_path: str, verbose: bool):
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False, resolve_path=True))
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
 @click.option("--clear", is_flag=True, help="Clear the Neo4j database before ingesting.")
-def ingest(repo_path: str, verbose: bool, clear: bool):
+@click.option("--cluster", is_flag=True, help="Run community detection to discover business domains.")
+def ingest(repo_path: str, verbose: bool, clear: bool, cluster: bool):
     """Parse a repository and ingest it into the Neo4j graph database.
 
     REPO_PATH is the path to the repository root.
@@ -172,6 +173,17 @@ def ingest(repo_path: str, verbose: bool, clear: bool):
         click.echo(f"  [+] Ingesting {len(result.nodes)} nodes and {len(result.edges)} edges...")
         client.ingest_parse_result(result)
         client.close()
+        
+        if cluster:
+            click.echo("\n  3. Running community detection (Domain Clustering)...")
+            from codelens.graph.clustering import DomainClusterer
+            import os
+            # Use GEMINI_API_KEY from environment if present
+            api_key = os.environ.get("GEMINI_API_KEY")
+            clusterer = DomainClusterer(api_key=api_key)
+            domains = clusterer.run_clustering()
+            if domains:
+                click.echo(f"  ✓ Discovered and summarized {len(domains)} domains.")
         
         click.echo("\n  ✓ Ingestion complete!")
     except Exception as e:

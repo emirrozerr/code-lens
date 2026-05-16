@@ -203,3 +203,74 @@ def get_callees(symbol_name: str) -> str:
         return f"Error executing get_callees: {e}"
     finally:
         client.close()
+
+
+@mcp.tool()
+def get_domains() -> str:
+    """Returns a list of all discovered business domains in the codebase.
+    
+    Use this to get a high-level overview of the system architecture.
+    """
+    client = Neo4jClient()
+    try:
+        with client.session() as session:
+            query = """
+            MATCH (d:Domain)
+            OPTIONAL MATCH (n)-[:IN_DOMAIN]->(d)
+            RETURN d.name AS name, d.summary AS summary, count(n) AS member_count
+            ORDER BY member_count DESC
+            """
+            result = session.run(query)
+            
+            output = ["Discovered Business Domains:"]
+            found = False
+            for record in result:
+                found = True
+                output.append(f"\n- {record['name']} ({record['member_count']} internal nodes)")
+                output.append(f"  Summary: {record['summary']}")
+                
+            if not found:
+                return "No domains found. Run clustering first."
+            return "\n".join(output)
+    except Exception as e:
+        return f"Error executing get_domains: {e}"
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def get_domain(domain_name: str) -> str:
+    """Returns the full context and all member nodes of a specific business domain.
+    
+    Args:
+        domain_name: The exact name of the domain (e.g., 'Domain 2').
+    """
+    client = Neo4jClient()
+    try:
+        with client.session() as session:
+            query = """
+            MATCH (d:Domain {name: $domain_name})
+            OPTIONAL MATCH (n)-[:IN_DOMAIN]->(d)
+            RETURN d.summary AS summary, collect(n) AS members
+            """
+            record = session.run(query, domain_name=domain_name).single()
+            
+            if not record:
+                return f"Domain '{domain_name}' not found."
+                
+            output = [
+                f"=== {domain_name} ===",
+                f"Summary: {record['summary']}",
+                "\nMembers:"
+            ]
+            
+            for m in record['members']:
+                if m:
+                    label = list(m.labels)[0] if m.labels else "Unknown"
+                    output.append(f"  - [{label}] {m.get('name', 'unnamed')}")
+                    
+            return "\n".join(output)
+    except Exception as e:
+        return f"Error executing get_domain: {e}"
+    finally:
+        client.close()
