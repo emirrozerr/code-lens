@@ -130,6 +130,14 @@ export async function deleteRepo(id: string): Promise<void> {
   await apiFetch<void>(`/api/repos/${id}`, { method: 'DELETE' });
 }
 
+// ─── Jobs ──────────────────────────────────────────────────────────────────
+
+export async function listJobs(limit = 50): Promise<IndexingJob[]> {
+  if (MOCK_MODE) return MOCK_JOBS.slice(0, limit);
+
+  return apiFetch<IndexingJob[]>(`/api/jobs?limit=${limit}`);
+}
+
 // ─── Domains ───────────────────────────────────────────────────────────────
 
 export async function listDomains(repoId?: string): Promise<Domain[]> {
