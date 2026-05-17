@@ -1,19 +1,22 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { PersonaToggle } from '@/components/chat/PersonaToggle';
 import { DomainSidebar } from '@/components/chat/DomainSidebar';
-import type { Persona } from '@/types/api';
+import { EmptyState } from '@/components/chat/EmptyState';
+import { MessageBubble } from '@/components/chat/MessageBubble';
+import type { ChatMessage, Persona } from '@/types/api';
+import { ArrowUp } from 'lucide-react';
 
-// ─── Storage keys (imported by Story #49 chat implementation) ──────────────
+// ─── Storage keys ──────────────────────────────────────────────────────────
 export const QUESTION_KEY = 'codelens_pending_question';
 export const PERSONA_KEY = 'codelens_persona';
 
 const PERSONAS: Persona[] = ['developer', 'product', 'legal'];
 
-// ─── 401 re-auth helper (called by chat SSE handler in Story #49) ──────────
+// ─── 401 re-auth helper ────────────────────────────────────────────────────
 export function triggerReAuth(pendingQuestion?: string): void {
   if (typeof window === 'undefined') return;
   if (pendingQuestion?.trim()) {
@@ -22,6 +25,17 @@ export function triggerReAuth(pendingQuestion?: string): void {
   window.location.href = '/login?reason=expired';
 }
 
+// ─── Stub assistant response ───────────────────────────────────────────────
+const STUB_RESPONSE =
+  'This is a stub response — SSE streaming will be implemented in **Story #49**.\n\n' +
+  'Here is an example of markdown rendering:\n\n' +
+  '```typescript\n' +
+  'function applyDiscount(price: number, pct: number): number {\n' +
+  '  return price * (1 - pct / 100);\n' +
+  '}\n' +
+  '```\n\n' +
+  'Lists, **bold**, and `inline code` are also supported.';
+
 // ─── Page ──────────────────────────────────────────────────────────────────
 
 export default function AskPage() {
@@ -29,8 +43,13 @@ export default function AskPage() {
   const router = useRouter();
 
   const [persona, setPersona] = useState<Persona>('developer');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [restoredQuestion, setRestoredQuestion] = useState<string | null>(null);
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const restored = useRef(false);
 
   // Restore sessionStorage on first mount
@@ -46,12 +65,11 @@ export default function AskPage() {
     const savedQ = sessionStorage.getItem(QUESTION_KEY);
     if (savedQ) {
       setRestoredQuestion(savedQ);
-      setInputValue(savedQ);
       sessionStorage.removeItem(QUESTION_KEY);
     }
   }, []);
 
-  // Persist persona selection
+  // Persist persona
   useEffect(() => {
     sessionStorage.setItem(PERSONA_KEY, persona);
   }, [persona]);
@@ -63,13 +81,72 @@ export default function AskPage() {
     }
   }, [loading, user, router]);
 
-  function handlePersonaChange(p: Persona) {
-    setPersona(p);
-    // Switching mid-conversation only affects the next response — no message rewrite needed
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Auto-resize textarea
+  function resizeTextarea() {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }
 
-  function handleInsertPrompt(prompt: string) {
-    setInputValue(prompt);
+  const submitMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isSubmitting) return;
+
+      setInputValue('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      setIsSubmitting(true);
+
+      const userMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: trimmed,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      // Stub: 500ms delay then static assistant response
+      // Story #49 will replace this with SSE streaming
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
+      const assistantMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: STUB_RESPONSE,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setIsSubmitting(false);
+    },
+    [isSubmitting],
+  );
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void submitMessage(inputValue);
+    }
+  }
+
+  // DomainSidebar click now auto-submits (no longer just fills input)
+  const handleInsertPrompt = useCallback(
+    (prompt: string) => {
+      void submitMessage(prompt);
+    },
+    [submitMessage],
+  );
+
+  function handlePersonaChange(p: Persona) {
+    setPersona(p);
+    // Switching mid-conversation only affects next response
   }
 
   return (
@@ -81,19 +158,12 @@ export default function AskPage() {
         overflow: 'hidden',
       }}
     >
-      {/* Domain browser sidebar (Story #51) */}
+      {/* Domain browser sidebar (#51) */}
       <DomainSidebar onInsertPrompt={handleInsertPrompt} />
 
       {/* Chat column */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          minWidth: 0,
-        }}
-      >
-        {/* ── Header ─────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {/* ── Header ──────────────────────────────────────────────────────── */}
         <header
           style={{
             height: '52px',
@@ -107,7 +177,6 @@ export default function AskPage() {
             gap: '1rem',
           }}
         >
-          {/* Wordmark */}
           <span
             style={{
               fontFamily: 'var(--font-mono)',
@@ -120,10 +189,9 @@ export default function AskPage() {
             CodeLens
           </span>
 
-          {/* Persona toggle (Story #50) */}
+          {/* Persona toggle (#50) */}
           <PersonaToggle value={persona} onChange={handlePersonaChange} />
 
-          {/* User chip + logout */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
             {!loading && user && (
               <span
@@ -158,75 +226,124 @@ export default function AskPage() {
           </div>
         </header>
 
-        {/* ── Messages area ───────────────────────────────────────────────── */}
-        <main
+        {/* ── Messages / Empty state ───────────────────────────────────── */}
+        <div
           style={{
             flex: 1,
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '2rem',
-            gap: '1rem',
           }}
         >
+          {/* Re-auth restored question banner */}
           {restoredQuestion && (
             <div
               style={{
-                maxWidth: '560px',
+                margin: '1rem auto',
+                maxWidth: '720px',
                 width: '100%',
-                backgroundColor: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: '8px',
-                padding: '1rem 1.25rem',
-                fontFamily: 'var(--font-sans)',
-                fontSize: '0.875rem',
-                color: 'var(--text-muted)',
-                lineHeight: 1.6,
+                padding: '0 1rem',
               }}
             >
-              <span style={{ color: 'var(--text-dim)', marginRight: '0.5rem' }}>↩</span>
-              Restored:{' '}
-              <span style={{ color: 'var(--text)' }}>&ldquo;{restoredQuestion}&rdquo;</span>
+              <div
+                style={{
+                  backgroundColor: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'var(--font-sans)',
+                    fontSize: '0.875rem',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <span style={{ color: 'var(--text-dim)', marginRight: '0.375rem' }}>↩</span>
+                  You were asking:{' '}
+                  <span style={{ color: 'var(--text)' }}>&ldquo;{restoredQuestion}&rdquo;</span>
+                </span>
+                <button
+                  onClick={() => {
+                    void submitMessage(restoredQuestion);
+                    setRestoredQuestion(null);
+                  }}
+                  style={{
+                    fontFamily: 'var(--font-sans)',
+                    fontSize: '0.8125rem',
+                    color: 'var(--accent)',
+                    backgroundColor: 'transparent',
+                    border: '1px solid rgba(139,92,246,0.4)',
+                    borderRadius: '6px',
+                    padding: '0.25rem 0.625rem',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  Resubmit
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Empty state — replaced by ChatPage in Story #48 */}
-          <div
-            style={{
-              textAlign: 'center',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '0.5rem',
-            }}
-          >
-            <p
+          {messages.length === 0 && !restoredQuestion ? (
+            <EmptyState onSubmit={(p) => void submitMessage(p)} />
+          ) : (
+            <div
               style={{
-                fontFamily: "'Instrument Serif', Georgia, serif",
-                fontSize: '1.75rem',
-                fontWeight: 400,
-                color: 'var(--text)',
-                margin: 0,
+                flex: 1,
+                maxWidth: '720px',
+                width: '100%',
+                margin: '0 auto',
+                padding: '1.5rem 0',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.25rem',
               }}
             >
-              Ask CodeLens
-            </p>
-            <p
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: '0.875rem',
-                color: 'var(--text-dim)',
-                margin: 0,
-              }}
-            >
-              Chat implementation — Story #48
-            </p>
-          </div>
-        </main>
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
 
-        {/* ── Chat input stub (replaced by ChatInput in Story #48) ─────── */}
+              {/* Typing indicator */}
+              {isSubmitting && (
+                <div style={{ padding: '0 1rem' }}>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      gap: '4px',
+                      padding: '0.5rem 0.75rem',
+                      borderLeft: '2px solid var(--accent)',
+                      paddingLeft: '0.875rem',
+                    }}
+                  >
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        style={{
+                          width: '5px',
+                          height: '5px',
+                          borderRadius: '50%',
+                          backgroundColor: 'var(--text-dim)',
+                          animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </div>
+
+        {/* ── Input area ──────────────────────────────────────────────────── */}
         <div
           style={{
             borderTop: '1px solid var(--border)',
@@ -240,15 +357,21 @@ export default function AskPage() {
               maxWidth: '720px',
               margin: '0 auto',
               display: 'flex',
-              gap: '0.75rem',
+              gap: '0.625rem',
               alignItems: 'flex-end',
             }}
           >
             <textarea
+              ref={textareaRef}
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Ask about your codebase…"
-              rows={2}
+              onChange={(e) => {
+                setInputValue(e.target.value);
+                resizeTextarea();
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about your codebase… (Enter to send, Shift+Enter for newline)"
+              rows={1}
+              disabled={isSubmitting}
               style={{
                 flex: 1,
                 fontFamily: 'var(--font-sans)',
@@ -261,27 +384,47 @@ export default function AskPage() {
                 resize: 'none',
                 outline: 'none',
                 lineHeight: 1.5,
+                minHeight: '42px',
+                maxHeight: '200px',
+                overflowY: 'auto',
+                opacity: isSubmitting ? 0.6 : 1,
               }}
             />
             <button
-              disabled
-              title="Chat implementation coming in Story #48"
+              onClick={() => void submitMessage(inputValue)}
+              disabled={!inputValue.trim() || isSubmitting}
               style={{
-                padding: '0.625rem 1.25rem',
+                width: '38px',
+                height: '38px',
                 borderRadius: '8px',
                 border: 'none',
-                backgroundColor: 'var(--accent)',
-                color: '#fff',
-                fontFamily: 'var(--font-sans)',
-                fontSize: '0.875rem',
-                cursor: 'not-allowed',
-                opacity: 0.5,
+                backgroundColor:
+                  inputValue.trim() && !isSubmitting ? 'var(--accent)' : 'var(--surface-elevated)',
+                color: inputValue.trim() && !isSubmitting ? '#fff' : 'var(--text-dim)',
+                cursor: inputValue.trim() && !isSubmitting ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 flexShrink: 0,
+                transition: 'background-color 150ms, color 150ms',
               }}
             >
-              Send
+              <ArrowUp size={16} />
             </button>
           </div>
+          <p
+            style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: '0.6875rem',
+              color: 'var(--text-dim)',
+              textAlign: 'center',
+              margin: '0.375rem 0 0',
+            }}
+          >
+            Persona:{' '}
+            <span style={{ color: 'var(--text-muted)', textTransform: 'capitalize' }}>{persona}</span>
+            {' · '}Enter to send
+          </p>
         </div>
       </div>
     </div>
