@@ -79,6 +79,18 @@ export default function AskPage() {
     }
   }, [loading, user, router]);
 
+  // G keyboard shortcut → navigate to graph (skip when textarea focused)
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key !== 'g' && e.key !== 'G') return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return;
+      router.push('/graph');
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [router]);
+
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -640,6 +652,22 @@ export default function AskPage() {
             <span style={{ color: 'var(--text-muted)', textTransform: 'capitalize' }}>{persona}</span>
             {' · '}
             {isStreaming ? 'Streaming…' : 'Enter to send'}
+            {' · '}
+            Press{' '}
+            <kbd
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.625rem',
+                color: 'var(--text-dim)',
+                backgroundColor: 'var(--surface-elevated)',
+                border: '1px solid var(--border)',
+                borderRadius: '3px',
+                padding: '0.1em 0.35em',
+              }}
+            >
+              G
+            </kbd>
+            {' '}for graph view
           </p>
         </div>
       </div>
