@@ -131,10 +131,10 @@ class TestEdgeCases:
         with pytest.raises(ValueError, match="does not exist"):
             indexer.index_repository(Path("/nonexistent/repo"))
 
-    def test_directory_with_no_java_files(self, indexer, tmp_path):
-        """Indexing a directory with no Java files should return no nodes."""
+    def test_directory_with_no_supported_files(self, indexer, tmp_path):
+        """Indexing a directory with no supported files should return no nodes."""
         (tmp_path / "readme.md").write_text("# Hello")
-        (tmp_path / "script.py").write_text("print('hello')")
+        (tmp_path / "data.csv").write_text("a,b,c")
         result = indexer.index_repository(tmp_path)
         assert len(result.nodes) == 0
 

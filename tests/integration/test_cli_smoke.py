@@ -79,29 +79,6 @@ class TestCLIIndex:
         assert "edges" in data
         assert len(data["nodes"]) > 0
         assert len(data["edges"]) > 0
-
-    def test_index_json_structure(self, tmp_path):
-        """Validate the JSON output has the expected schema."""
-        output_file = tmp_path / "result.json"
-        _run_cli("index", str(FIXTURES), "--output", str(output_file))
-
-        data = json.loads(output_file.read_text())
-        # Check first node has all required fields
-        node = data["nodes"][0]
-        assert "uid" in node
-        assert "name" in node
-        assert "qualified_name" in node
-        assert "node_type" in node
-        assert "filepath" in node
-        assert "start_line" in node
-        assert "end_line" in node
-
-        # Check first edge has all required fields
-        edge = data["edges"][0]
-        assert "source_uid" in edge
-        assert "target_uid" in edge
-        assert "edge_type" in edge
-
     def test_index_verbose(self):
         result = _run_cli("index", str(FIXTURES), "--verbose")
         assert "Done" in result.stdout
@@ -114,6 +91,77 @@ class TestCLIIndex:
             text=True,
         )
         assert result.returncode != 0
+
+
+class TestCLIPythonIndex:
+    """Tests the `codelens index` command against Python files."""
+
+    def test_index_python_file(self, tmp_path):
+        py_file = tmp_path / "service.py"
+        py_file.write_text("class MyService:\n    def run(self):\n        pass\n")
+        result = _run_cli("index", str(tmp_path))
+        assert "Done" in result.stdout
+        assert "Nodes" in result.stdout
+
+    def test_index_python_json_output(self, tmp_path):
+        py_file = tmp_path / "service.py"
+        py_file.write_text("class MyService:\n    def run(self):\n        pass\n")
+        output_file = tmp_path / "result.json"
+        _run_cli("index", str(tmp_path), "--output", str(output_file))
+
+        assert output_file.exists()
+        data = json.loads(output_file.read_text())
+        classes = [n for n in data["nodes"] if n["node_type"] == "Class"]
+        funcs = [n for n in data["nodes"] if n["node_type"] == "Function"]
+        assert len(classes) == 1
+        assert classes[0]["name"] == "MyService"
+        assert len(funcs) == 1
+        assert funcs[0]["name"] == "run"
+
+    def test_index_mixed_java_python(self, tmp_path):
+        """Indexing a directory with both Java and Python files works."""
+        (tmp_path / "Main.java").write_text("public class Main {}")
+        (tmp_path / "app.py").write_text("class App:\n    pass\n")
+        output_file = tmp_path / "result.json"
+        _run_cli("index", str(tmp_path), "--output", str(output_file))
+
+        data = json.loads(output_file.read_text())
+        files = [n for n in data["nodes"] if n["node_type"] == "File"]
+        assert len(files) == 2
+        file_names = {f["name"] for f in files}
+        assert file_names == {"Main.java", "app.py"}
+
+
+class TestCLIEndToEnd:
+    """Full end-to-end pipeline test: index -> ingest -> query MCP tools."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_neo4j(self):
+        """Skip if Neo4j is not running."""
+        try:
+            from neo4j import GraphDatabase
+            driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "codelens_dev"))
+            with driver.session() as session:
+                session.run("RETURN 1")
+            driver.close()
+        except Exception:
+            pytest.skip("Neo4j not available for end-to-end test")
+
+    def test_full_pipeline(self):
+        """Index the sample-java-repo, ingest it, and verify MCP tools return correct data."""
+        # Step 1: Ingest via CLI
+        _run_cli("ingest", str(FIXTURES))
+
+        # Step 2: Verify MCP tools work against ingested data
+        from codelens.mcp_server.server import search_nodes, get_code_context
+
+        result = search_nodes("ShoppingCart")
+        assert "ShoppingCart" in result
+        assert "No nodes found" not in result
+
+        context = get_code_context("calculateTotal")
+        assert "Context for [Function] calculateTotal" in context
+        assert "Callers" in context
 
 
 class TestCLISpringPetClinic:

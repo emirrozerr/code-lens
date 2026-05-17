@@ -1,7 +1,7 @@
 """Integration tests for the FastMCP Server tools.
 
 These tests require a running Neo4j database on localhost:7687 
-with the Spring PetClinic test data ingested.
+with the sample-java-repo test data ingested.
 """
 
 import pytest
@@ -26,14 +26,14 @@ def check_db():
         client.close()
 
 
-def test_search_nodes_finds_owner(check_db):
+def test_search_nodes_finds_checkout(check_db):
     """Test the native Lucene full-text search tool."""
     # This shouldn't be async since FastMCP wrapper runs it synchronously in tests
-    result = search_nodes("OwnerRepository")
+    result = search_nodes("CheckoutService")
     
     assert "No nodes found" not in result
-    assert "[Interface] OwnerRepository" in result
-    assert "petclinic" in result
+    assert "[Class] CheckoutService" in result
+    assert "CheckoutService.java" in result
 
 
 def test_search_nodes_not_found(check_db):
@@ -44,19 +44,18 @@ def test_search_nodes_not_found(check_db):
 
 def test_get_code_context(check_db):
     """Test getting the multi-hop context for a specific function."""
-    # OwnerController's processFindForm
-    result = get_code_context("processFindForm")
+    result = get_code_context("calculateTotal")
     
-    assert "Context for [Function] processFindForm" in result
+    assert "Context for [Function] calculateTotal" in result
     assert "Callers" in result
     assert "Callees" in result
     assert "Conditional Branches" in result
     
     # Check that we found its branches
-    assert "if_statement" in result
+    assert "for_statement" in result or "if_statement" in result
     
     # Check that we found callees
-    assert "findPaginatedForOwnersLastName" in result
+    assert "getPrice" in result
 
 
 def test_get_code_context_not_found(check_db):
@@ -67,17 +66,17 @@ def test_get_code_context_not_found(check_db):
 
 def test_get_callers(check_db):
     """Test getting all callers for a symbol."""
-    # We know processFindForm calls findPaginatedForOwnersLastName
-    result = get_callers("findPaginatedForOwnersLastName")
+    # We know CheckoutService.checkout calls calculateTotal
+    result = get_callers("calculateTotal")
     
-    assert "Callers of 'findPaginatedForOwnersLastName':" in result
-    assert "processFindForm" in result
+    assert "Callers of 'calculateTotal':" in result
+    assert "checkout" in result
 
 
 def test_get_callees(check_db):
     """Test getting all callees of a symbol."""
-    result = get_callees("processFindForm")
+    result = get_callees("calculateTotal")
     
-    assert "Symbols called by 'processFindForm':" in result
-    assert "findPaginatedForOwnersLastName" in result
-    assert "getLastName" in result
+    assert "Symbols called by 'calculateTotal':" in result
+    assert "getPrice" in result
+    assert "getQuantity" in result
