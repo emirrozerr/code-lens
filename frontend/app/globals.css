@@ -145,3 +145,8 @@
   0%, 100% { border-color: var(--accent); }
   50% { border-color: rgba(139, 92, 246, 0.3); }
 }
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}

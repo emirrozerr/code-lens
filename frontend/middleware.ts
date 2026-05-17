@@ -28,7 +28,7 @@ export function middleware(request: NextRequest): NextResponse {
   const token = request.cookies.get(COOKIE_NAME)?.value;
 
   const isAdminPath = pathname.startsWith('/admin');
-  const isDemoPath = pathname.startsWith('/ask');
+  const isDemoPath = pathname.startsWith('/ask') || pathname.startsWith('/graph');
 
   if (!isAdminPath && !isDemoPath) {
     return NextResponse.next();
@@ -68,5 +68,5 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/ask/:path*'],
+  matcher: ['/admin/:path*', '/ask/:path*', '/graph/:path*', '/graph'],
 };
