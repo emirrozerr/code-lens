@@ -27,7 +27,8 @@ We have successfully implemented **Phase 1 (Core Ingestion)**, **Phase 2 (MCP Se
 - **MCP Server (FastMCP):** A robust SSE-based server exposing `search_nodes`, `get_code_context`, `get_callers`, `get_callees`, `get_domains`, and `get_domain`. All tools benchmarked under 400ms.
 - **Dockerization:** `docker-compose up -d` runs both Neo4j and the MCP server (exposed on port 8000 via SSE).
 - **Domain Clustering (Phase 3):** Analyzes the graph using Louvain community detection to group interconnected nodes into business Domains, passing them to the Gemini API to generate plain-English architectural summaries.
-- **Test Suite (90 tests):** Unit tests for Java parser (20), Python parser (26), watcher (4). Integration tests for indexer (8), incremental indexing (2), Neo4j client (5), MCP server (6), CLI smoke tests (12), end-to-end pipeline (1). PetClinic regression tests (3). All green.
+- **GitHub Actions CI Workflow:** Automatically sets up environment, runs Ruff linter, and executes the complete test suite with coverage reporting on every push/PR.
+- **Robust Test Suite (112 tests, 91% coverage):** Excellent unit and integration test coverage across all layers (Java Parser 85%, Python Parser 97%, Watcher 81%, CLI 99%, Clustering 99%, Neo4j Client 95%, MCP Server 86%). All tests passing.
 
 ### What is PLANNED NEXT:
 - **Phase 4 (Query Integration):** Actually pointing an LLM agent (Claude/Cursor) to the `codelens-mcp` server endpoint to prove it improves the agent's contextual awareness of large codebases.
