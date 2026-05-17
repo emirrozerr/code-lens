@@ -34,7 +34,7 @@ class CodeLensEventHandler(FileSystemEventHandler):
         if any(p in skip_dirs or p.startswith(".") for p in path.parts):
             return False
 
-        return path.suffix.lower() == ".java"
+        return path.suffix.lower() in {".java", ".py"}
 
     def on_created(self, event: FileSystemEvent):
         if self._is_relevant(event):
@@ -57,10 +57,10 @@ class CodeLensEventHandler(FileSystemEventHandler):
             # Use same filters
             skip_dirs = {".git", "target", "build", "node_modules", ".idea", ".vscode"}
 
-            old_relevant = old_path.suffix.lower() == ".java" and not any(
+            old_relevant = old_path.suffix.lower() in {".java", ".py"} and not any(
                 p in skip_dirs or p.startswith(".") for p in old_path.parts
             )
-            new_relevant = new_path.suffix.lower() == ".java" and not any(
+            new_relevant = new_path.suffix.lower() in {".java", ".py"} and not any(
                 p in skip_dirs or p.startswith(".") for p in new_path.parts
             )
 

@@ -8,18 +8,29 @@ import pytest
 from neo4j.exceptions import ServiceUnavailable
 
 from codelens.graph.neo4j_client import Neo4jClient
-from codelens.mcp_server.server import search_nodes, get_code_context, get_callers, get_callees
+from codelens.mcp_server.server import search_nodes, get_code_context, get_callers, get_callees, get_domains, get_domain
 
 
 @pytest.fixture(scope="module")
 def check_db():
-    """Skip tests if Neo4j is offline or empty."""
+    """Ingest the sample-java-repo to ensure Neo4j has correct test data."""
+    from pathlib import Path
+    from codelens.indexer.indexer import Indexer
+    
+    fixtures_dir = Path(__file__).resolve().parent.parent / "fixtures" / "sample-java-repo"
+    indexer = Indexer()
+    result = indexer.index_repository(fixtures_dir)
+    
     client = Neo4jClient()
     try:
-        with client.session() as session:
-            result = session.run("MATCH (n) RETURN count(n) as count")
-            if result.single()["count"] == 0:
-                pytest.skip("Neo4j database is empty. Run 'codelens ingest' first.")
+        # Check connection first
+        with client.session() as s:
+            s.run("RETURN 1")
+        
+        # Clear and ingest test dataset
+        client.clear_database()
+        client.setup_schema()
+        client.ingest_parse_result(result)
     except ServiceUnavailable:
         pytest.skip("Neo4j is not running on localhost:7687")
     finally:
@@ -80,3 +91,45 @@ def test_get_callees(check_db):
     assert "Symbols called by 'calculateTotal':" in result
     assert "getPrice" in result
     assert "getQuantity" in result
+
+
+def test_get_domains_and_domain(check_db):
+    """Test the get_domains and get_domain MCP tools."""
+    # 1. Clean/prepare mock domain
+    client = Neo4jClient()
+    try:
+        with client.session() as session:
+            # Clean existing domains
+            session.run("MATCH (d:Domain) DETACH DELETE d")
+            
+            # Check empty domains message
+            res_empty = get_domains()
+            assert "No domains found. Run clustering first." in res_empty
+            
+            # Test getting non-existent domain
+            res_missing = get_domain("NonExistentDomain")
+            assert "Domain 'NonExistentDomain' not found" in res_missing
+            
+            # Create a mock Domain and link a node to it
+            session.run("""
+                CREATE (d:Domain {name: 'Test Domain', summary: 'A mock domain for testing'})
+                WITH d
+                MATCH (n:Class {name: 'CheckoutService'})
+                CREATE (n)-[:IN_DOMAIN]->(d)
+            """)
+            
+            # Test get_domains returns it
+            res_list = get_domains()
+            assert "Test Domain" in res_list
+            assert "A mock domain for testing" in res_list
+            
+            # Test get_domain returns members
+            res_single = get_domain("Test Domain")
+            assert "=== Test Domain ===" in res_single
+            assert "CheckoutService" in res_single
+    finally:
+        # Clean up domains so we don't pollute subsequent queries
+        with client.session() as session:
+            session.run("MATCH (d:Domain) DETACH DELETE d")
+        client.close()
+

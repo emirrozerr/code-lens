@@ -124,3 +124,88 @@ class TestWatcherEventHandler:
         assert len(events) == 1
         assert events[0][0] == "changed"
         assert events[0][1].name == "Main.java"
+
+    def test_event_handler_on_created_and_deleted(self):
+        from watchdog.events import FileCreatedEvent, FileDeletedEvent
+        q = Queue()
+        handler = CodeLensEventHandler(q)
+        
+        handler.on_created(FileCreatedEvent("/repo/src/Foo.java"))
+        handler.on_deleted(FileDeletedEvent("/repo/src/Bar.py"))
+        
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+            
+        assert len(events) == 2
+        assert events[0] == ("changed", Path("/repo/src/Foo.java"))
+        assert events[1] == ("deleted", Path("/repo/src/Bar.py"))
+
+    def test_event_handler_on_moved(self):
+        from watchdog.events import FileMovedEvent
+        q = Queue()
+        handler = CodeLensEventHandler(q)
+        
+        # Move relevant to relevant
+        handler.on_moved(FileMovedEvent("/repo/src/Bar.java", "/repo/src/NewBar.py"))
+        # Move irrelevant to irrelevant
+        handler.on_moved(FileMovedEvent("/repo/target/Bar.class", "/repo/target/NewBar.class"))
+        
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+            
+        assert len(events) == 2
+        assert events[0] == ("deleted", Path("/repo/src/Bar.java"))
+        assert events[1] == ("changed", Path("/repo/src/NewBar.py"))
+
+
+class TestWatcherDaemonExecution:
+    """Test WatcherDaemon control logic, loops, and debouncing."""
+
+    def test_watcher_daemon_start_validation(self):
+        daemon = WatcherDaemon(Path("/nonexistent/dir"))
+        with pytest.raises(ValueError, match="does not exist"):
+            daemon.start()
+
+    def test_watcher_daemon_stop(self):
+        from unittest.mock import MagicMock
+        daemon = WatcherDaemon(Path("."))
+        daemon.observer = MagicMock()
+        daemon._running = True
+        daemon.stop()
+        assert not daemon._running
+        daemon.observer.stop.assert_called_once()
+        daemon.observer.join.assert_called_once()
+
+    def test_watcher_daemon_process_loop_debounces(self):
+        from unittest.mock import MagicMock
+        daemon = WatcherDaemon(Path("/fake/repo"))
+        daemon.indexer = MagicMock()
+        daemon.current_result = MagicMock()
+        daemon._running = True
+        
+        # Populate some mock events in the queue
+        daemon.event_queue.put(("changed", Path("/fake/repo/A.java")))
+        daemon.event_queue.put(("changed", Path("/fake/repo/B.java")))
+        daemon.event_queue.put(("deleted", Path("/fake/repo/C.java")))
+        
+        # We want to exit the loop after one cycle
+        # Patch time.sleep to set _running = False so the loop terminates immediately
+        import time
+        original_sleep = time.sleep
+        def mock_sleep(secs):
+            daemon._running = False
+            
+        time.sleep = mock_sleep
+        try:
+            daemon._process_loop()
+        finally:
+            time.sleep = original_sleep
+            
+        # Assert indexer was called once with aggregated events
+        daemon.indexer.index_incremental.assert_called_once()
+        args = daemon.indexer.index_incremental.call_args[0]
+        assert set(args[2]) == {Path("/fake/repo/A.java"), Path("/fake/repo/B.java")}
+        assert set(args[3]) == {Path("/fake/repo/C.java")}
+
