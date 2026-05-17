@@ -27,7 +27,6 @@ We have successfully implemented **Phase 1 (Core Ingestion)**, **Phase 2 (MCP Se
 - **MCP Server (FastMCP):** A robust SSE-based server exposing `search_nodes`, `get_code_context`, `get_callers`, `get_callees`, `get_domains`, and `get_domain`. All tools benchmarked under 400ms.
 - **Dockerization:** `docker-compose up -d` runs both Neo4j and the MCP server (exposed on port 8000 via SSE).
 - **Domain Clustering (Phase 3):** Analyzes the graph using Louvain community detection to group interconnected nodes into business Domains, passing them to the Gemini API to generate plain-English architectural summaries.
-- **GitHub Actions CI Workflow:** Automatically sets up environment, runs Ruff linter, and executes the complete test suite with coverage reporting on every push/PR.
 - **Robust Test Suite (112 tests, 91% coverage):** Excellent unit and integration test coverage across all layers (Java Parser 85%, Python Parser 97%, Watcher 81%, CLI 99%, Clustering 99%, Neo4j Client 95%, MCP Server 86%). All tests passing.
 
 ### What is PLANNED NEXT:
@@ -44,7 +43,7 @@ All tasks must strictly map to issues in the GitHub repository.
 ## 6. How to Resume Work
 1. Source the virtual environment: `source .venv/bin/activate`
 2. Spin up the backend (Neo4j + MCP): `docker compose up -d`
-3. Run tests to verify state: `pytest` (expect 90 tests, all green)
+3. Run tests to verify state: `pytest` (expect 112 tests, all green)
 4. Re-index a test repository and build clusters: `export GEMINI_API_KEY="..."; codelens ingest tests/fixtures/spring-petclinic --cluster`
 5. Run the benchmark: `python scripts/benchmark_incremental_mcp.py`
 
