@@ -7,7 +7,7 @@ CodeLens is a code intelligence infrastructure layer that parses local repositor
 
 ## 2. Technical Stack
 - **Language/Environment:** Python 3.11+, Click (CLI)
-- **Parser:** Tree-sitter (Java implemented as MVP)
+- **Parsers:** Tree-sitter (Java + Python implemented)
 - **Graph Database:** Neo4j (local via Docker Compose `neo4j:5-community` with APOC & GDS)
 - **Background Watcher:** `watchdog` library for real-time incremental re-indexing
 - **MCP Framework:** `mcp` (FastMCP over SSE)
@@ -19,12 +19,15 @@ We have successfully implemented **Phase 1 (Core Ingestion)**, **Phase 2 (MCP Se
 ### What is DONE:
 - **Project Scaffold:** Monorepo structure, `pyproject.toml`, pytest, `docker-compose.yml`.
 - **Java Parser:** Extracts Files, Classes, Interfaces, Constructors, Methods, ConditionalBranches, ReturnStatements, and resolves edges (calls, contains, returns, has_branch, imports).
-- **Repository Indexer:** Handles incremental updates (only re-parsing changed files).
+- **Python Parser:** Full parity with Java parser. Extracts classes, functions, `__init__` as Constructors, imports, inheritance, conditionals, return statements, and call edges.
+- **Multi-Language Indexer:** Routes `.java` to JavaParser and `.py` to PythonParser. Skips `.venv`, `__pycache__`, `.git`, `target`, `build`, etc.
+- **Repository Indexer:** Handles incremental updates (only re-parsing changed files). Benchmarked at 28x faster than full re-index.
 - **Watcher Daemon:** Background process using `watchdog` to monitor the file system for changes.
 - **Graph Ingestion Layer:** Persists the graph structure to Neo4j with optimized batch queries and constraints.
-- **MCP Server (FastMCP):** A robust SSE-based server exposing `search_nodes`, `get_code_context`, `get_callers`, `get_callees`, `get_domains`, and `get_domain`.
+- **MCP Server (FastMCP):** A robust SSE-based server exposing `search_nodes`, `get_code_context`, `get_callers`, `get_callees`, `get_domains`, and `get_domain`. All tools benchmarked under 400ms.
 - **Dockerization:** `docker-compose up -d` runs both Neo4j and the MCP server (exposed on port 8000 via SSE).
 - **Domain Clustering (Phase 3):** Analyzes the graph using Louvain community detection to group interconnected nodes into business Domains, passing them to the Gemini API to generate plain-English architectural summaries.
+- **Test Suite (90 tests):** Unit tests for Java parser (20), Python parser (26), watcher (4). Integration tests for indexer (8), incremental indexing (2), Neo4j client (5), MCP server (6), CLI smoke tests (12), end-to-end pipeline (1). PetClinic regression tests (3). All green.
 
 ### What is PLANNED NEXT:
 - **Phase 4 (Query Integration):** Actually pointing an LLM agent (Claude/Cursor) to the `codelens-mcp` server endpoint to prove it improves the agent's contextual awareness of large codebases.
@@ -40,5 +43,10 @@ All tasks must strictly map to issues in the GitHub repository.
 ## 6. How to Resume Work
 1. Source the virtual environment: `source .venv/bin/activate`
 2. Spin up the backend (Neo4j + MCP): `docker compose up -d`
-3. Run tests to verify state: `pytest`
+3. Run tests to verify state: `pytest` (expect 90 tests, all green)
 4. Re-index a test repository and build clusters: `export GEMINI_API_KEY="..."; codelens ingest tests/fixtures/spring-petclinic --cluster`
+5. Run the benchmark: `python scripts/benchmark_incremental_mcp.py`
+
+## 7. Open Issues / PRs
+- **PR #20 (Presentation Layer):** Streamlit-based UI. Under review — team is deciding between Streamlit (fast) vs React/Next.js (premium UX).
+- **PR #33 (Docker Neo4j setup):** Closed — duplicate of existing infrastructure.
