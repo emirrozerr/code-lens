@@ -1,4 +1,5 @@
-import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
 const kpis = [
@@ -78,7 +79,9 @@ export default function HomePage() {
             marginBottom: '4rem',
           }}
         >
-          <Button
+          <Link
+            href="/admin/dashboard"
+            className={buttonVariants({ variant: 'default' })}
             style={{
               backgroundColor: 'var(--accent)',
               color: '#ffffff',
@@ -86,22 +89,25 @@ export default function HomePage() {
               fontFamily: 'var(--font-sans)',
               fontWeight: 500,
               padding: '0.625rem 1.5rem',
+              textDecoration: 'none',
             }}
           >
             Open Admin Panel
-          </Button>
-          <Button
-            variant="outline"
+          </Link>
+          <Link
+            href="/ask"
+            className={buttonVariants({ variant: 'outline' })}
             style={{
               borderColor: 'var(--border-strong)',
               color: 'var(--text-muted)',
               backgroundColor: 'transparent',
               fontFamily: 'var(--font-sans)',
               padding: '0.625rem 1.5rem',
+              textDecoration: 'none',
             }}
           >
             Ask CodeLens
-          </Button>
+          </Link>
         </div>
 
         <div
