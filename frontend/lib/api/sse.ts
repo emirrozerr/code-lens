@@ -1,4 +1,4 @@
-import type { ChatEvent, Persona } from '@/types/api';
+import type { ChatEvent, ChatMessage, Persona } from '@/types/api';
 import { MOCK_MODE, ApiError } from './client';
 import { MOCK_CHAT_EVENTS } from './mocks';
 
@@ -13,7 +13,7 @@ export interface ChatStream {
 
 // ─── Mock stream ───────────────────────────────────────────────────────────
 
-function createMockStream(_message: string, _persona: Persona): ChatStream {
+function createMockStream(_message: string, _persona: Persona, _history: ChatMessage[]): ChatStream {
   let handler: ((event: ChatEvent) => void) | null = null;
   let cancelled = false;
   const timers: ReturnType<typeof setTimeout>[] = [];
@@ -48,7 +48,7 @@ function createMockStream(_message: string, _persona: Persona): ChatStream {
 
 // ─── Real stream (fetch-based SSE for POST) ────────────────────────────────
 
-function createRealStream(message: string, persona: Persona): ChatStream {
+function createRealStream(message: string, persona: Persona, history: ChatMessage[]): ChatStream {
   let handler: ((event: ChatEvent) => void) | null = null;
   let cancelled = false;
   const controller = new AbortController();
@@ -61,7 +61,7 @@ function createRealStream(message: string, persona: Persona): ChatStream {
       res = await fetch(`${base}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify({ message, persona }),
+        body: JSON.stringify({ message, persona, history }),
         credentials: 'include',
         signal: controller.signal,
       });
@@ -134,7 +134,11 @@ function createRealStream(message: string, persona: Persona): ChatStream {
 
 // ─── Public factory ────────────────────────────────────────────────────────
 
-export function createChatStream(message: string, persona: Persona): ChatStream {
-  if (MOCK_MODE) return createMockStream(message, persona);
-  return createRealStream(message, persona);
+export function createChatStream(
+  message: string,
+  persona: Persona,
+  history: ChatMessage[] = [],
+): ChatStream {
+  if (MOCK_MODE) return createMockStream(message, persona, history);
+  return createRealStream(message, persona, history);
 }

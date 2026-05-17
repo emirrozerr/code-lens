@@ -140,3 +140,8 @@
     transform: translateY(0);
   }
 }
+
+@keyframes tool-pulse {
+  0%, 100% { border-color: var(--accent); }
+  50% { border-color: rgba(139, 92, 246, 0.3); }
+}
