@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@/types/api';
 import { MarkdownContent } from './MarkdownContent';
+import { ToolCallCard } from './ToolCallCard';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -36,6 +37,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     );
   }
 
+  const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
+
   return (
     <div
       style={{
@@ -54,9 +57,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           color: 'var(--text-muted)',
           lineHeight: 1.7,
           wordBreak: 'break-word',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem',
         }}
       >
-        <MarkdownContent content={message.content} />
+        {/* Tool calls appear first, in invocation order */}
+        {hasToolCalls && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            {message.toolCalls!.map((tc) => (
+              <ToolCallCard key={tc.id} toolCall={tc} />
+            ))}
+          </div>
+        )}
+
+        {/* Streaming text content */}
+        {message.content && <MarkdownContent content={message.content} />}
       </div>
     </div>
   );
