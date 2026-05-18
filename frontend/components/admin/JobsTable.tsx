@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 interface JobsTableProps {
   jobs: IndexingJob[];
   isLoading: boolean;
+  isError?: boolean;
 }
 
 const STATUS_STYLES: Record<
@@ -61,7 +62,7 @@ function formatRelative(iso: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function JobsTable({ jobs, isLoading }: JobsTableProps) {
+export function JobsTable({ jobs, isLoading, isError }: JobsTableProps) {
   return (
     <div
       style={{
@@ -91,6 +92,10 @@ export function JobsTable({ jobs, isLoading }: JobsTableProps) {
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
           ))}
+        </div>
+      ) : isError ? (
+        <div style={{ padding: '2rem', textAlign: 'center', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+          Failed to load jobs
         </div>
       ) : (
         <Table>

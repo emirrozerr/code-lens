@@ -7,13 +7,13 @@ import { JobsTable } from '@/components/admin/JobsTable';
 import { HealthCard } from '@/components/admin/HealthCard';
 
 export default function DashboardPage() {
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading, isError: statsError } = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
     refetchOnWindowFocus: true,
   });
 
-  const { data: jobs = [], isLoading: jobsLoading } = useQuery({
+  const { data: jobs = [], isLoading: jobsLoading, isError: jobsError } = useQuery({
     queryKey: ['jobs', 10],
     queryFn: () => listJobs(10),
     refetchOnWindowFocus: true,
@@ -52,6 +52,13 @@ export default function DashboardPage() {
           System overview and recent indexing activity
         </p>
       </div>
+
+      {/* Stats error */}
+      {statsError && (
+        <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', backgroundColor: 'var(--surface)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+          Failed to load system stats. Check your connection and try again.
+        </div>
+      )}
 
       {/* KPI row */}
       <div
@@ -99,7 +106,7 @@ export default function DashboardPage() {
           alignItems: 'start',
         }}
       >
-        <JobsTable jobs={jobs} isLoading={jobsLoading} />
+        <JobsTable jobs={jobs} isLoading={jobsLoading} isError={jobsError} />
         <HealthCard stats={stats} isLoading={statsLoading} />
       </div>
     </div>

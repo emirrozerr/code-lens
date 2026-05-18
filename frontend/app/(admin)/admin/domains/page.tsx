@@ -23,7 +23,7 @@ export default function DomainsPage() {
 
   const domainQueryKey = ['domains', repoFilter];
 
-  const { data: domains = [], isLoading: domainsLoading } = useQuery({
+  const { data: domains = [], isLoading: domainsLoading, isError: domainsError } = useQuery({
     queryKey: domainQueryKey,
     queryFn: () => listDomains(repoFilter || undefined),
     refetchOnWindowFocus: true,
@@ -158,7 +158,11 @@ export default function DomainsPage() {
       </div>
 
       {/* Domain grid */}
-      {domainsLoading ? (
+      {domainsError ? (
+        <div style={{ padding: '0.75rem 1rem', backgroundColor: 'var(--surface)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+          Failed to load domains. Check your connection and try again.
+        </div>
+      ) : domainsLoading ? (
         <div
           style={{
             display: 'grid',

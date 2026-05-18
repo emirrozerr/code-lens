@@ -181,7 +181,7 @@ export default function RepositoriesPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Repository | null>(null);
 
-  const { data: repos = [], isLoading } = useQuery({
+  const { data: repos = [], isLoading, isError } = useQuery({
     queryKey: ['repos'],
     queryFn: listRepos,
     refetchOnWindowFocus: true,
@@ -270,6 +270,13 @@ export default function RepositoriesPage() {
           Add repository
         </Button>
       </div>
+
+      {/* Error state */}
+      {isError && (
+        <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', backgroundColor: 'var(--surface)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+          Failed to load repositories. Check your connection and try again.
+        </div>
+      )}
 
       {/* Table */}
       <div style={{ animation: 'fade-up 300ms ease-out 50ms both' }}>
