@@ -155,6 +155,7 @@ export function ReposTable({ repos, isLoading, onView, onReindex, onDelete }: Re
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger
+                        aria-label={`Actions for ${repo.name}`}
                         style={{
                           display: 'flex',
                           alignItems: 'center',

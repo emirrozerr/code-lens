@@ -66,6 +66,7 @@ function AddRepoDialog({ open, onOpenChange, onAdd, isPending }: AddDialogProps)
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               required
+              autoFocus
             />
           </div>
           <div>
@@ -153,6 +154,7 @@ function DeleteRepoDialog({ repo, open, onOpenChange, onConfirm, isPending }: De
               placeholder={repo?.name ?? ''}
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
+              autoFocus
             />
           </div>
           <DialogFooter>

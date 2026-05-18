@@ -186,6 +186,7 @@ function AddUserDialog({ open, onOpenChange }: AddUserDialogProps) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoFocus
               />
             </div>
             <DialogFooter>
