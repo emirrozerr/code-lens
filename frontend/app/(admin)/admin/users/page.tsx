@@ -402,7 +402,7 @@ export default function UsersPage() {
   const [roleTarget, setRoleTarget] = useState<User | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
-  const { data: users = [], isLoading } = useQuery({
+  const { data: users = [], isLoading, isError } = useQuery({
     queryKey: ['users'],
     queryFn: listUsers,
     refetchOnWindowFocus: true,
@@ -493,6 +493,10 @@ export default function UsersPage() {
               <Skeleton key={i} className="h-10 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <div style={{ padding: '2rem', textAlign: 'center', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+            Failed to load users. Check your connection and try again.
+          </div>
         ) : (
           <Table>
             <TableHeader>
@@ -569,6 +573,7 @@ export default function UsersPage() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger
+                          aria-label={`Actions for ${u.email}`}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
