@@ -100,7 +100,7 @@ export function DomainCard({ domain, isRegenerating, onSave, onRegenerate }: Dom
         style={{
           position: 'absolute',
           top: '0.75rem',
-          right: '2.25rem',
+          right: '3rem',
           display: 'flex',
           alignItems: 'center',
           gap: '0.375rem',

@@ -111,59 +111,34 @@ interface DeleteDialogProps {
 }
 
 function DeleteRepoDialog({ repo, open, onOpenChange, onConfirm, isPending }: DeleteDialogProps) {
-  const [typed, setTyped] = useState('');
-  const matches = typed === repo?.name;
-
   return (
-    <Dialog open={open} onOpenChange={(v: boolean) => { onOpenChange(v); if (!v) setTyped(''); }}>
-      <DialogContent style={{ maxWidth: '440px' }}>
+    <Dialog open={open} onOpenChange={(v: boolean) => onOpenChange(v)}>
+      <DialogContent style={{ maxWidth: '420px' }}>
         <DialogHeader>
           <DialogTitle>Delete repository</DialogTitle>
         </DialogHeader>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <p
             style={{
               fontFamily: 'var(--font-sans)',
               fontSize: '0.875rem',
               color: 'var(--text-muted)',
               lineHeight: 1.6,
+              margin: 0,
             }}
           >
-            This will permanently delete{' '}
-            <span
-              style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)', fontSize: '0.8125rem' }}
-            >
+            Permanently delete{' '}
+            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)', fontSize: '0.8125rem' }}>
               {repo?.name}
             </span>{' '}
-            and all its indexed data. This action cannot be undone.
+            and all its indexed data? This cannot be undone.
           </p>
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontFamily: 'var(--font-sans)',
-                fontSize: '0.8125rem',
-                color: 'var(--text-muted)',
-                marginBottom: '0.375rem',
-              }}
-            >
-              Type <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{repo?.name}</span> to confirm
-            </label>
-            <Input
-              type="text"
-              placeholder={repo?.name ?? ''}
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              autoFocus
-            />
-          </div>
           <DialogFooter>
-            <Button
-              variant="destructive"
-              disabled={!matches || isPending}
-              onClick={onConfirm}
-            >
-              {isPending ? 'Deleting…' : 'Delete repository'}
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" disabled={isPending} onClick={onConfirm}>
+              {isPending ? 'Deleting…' : 'Delete'}
             </Button>
           </DialogFooter>
         </div>

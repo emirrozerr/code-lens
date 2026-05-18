@@ -15,6 +15,10 @@ function domainColor(domainId: string, allDomainIds: string[]): string {
   return `hsl(${hue}, 60%, 55%)`;
 }
 
+function withAlpha(hslColor: string, alpha: number): string {
+  return hslColor.replace('hsl(', 'hsla(').replace(')', `, ${alpha})`);
+}
+
 // ─── Node radius by degree ──────────────────────────────────────────────────
 
 function nodeRadius(degree: number, maxDegree: number): number {
@@ -47,8 +51,11 @@ function SidePanel({ node, allNodes, allEdges, domainIds, onClose, onNavigate }:
   const neighborIds = useMemo(() => {
     const ids = new Set<string>();
     for (const e of allEdges) {
-      if (e.source === node.id) ids.add(e.target);
-      if (e.target === node.id) ids.add(e.source);
+      // e.source / e.target may be a string ID or a mutated node object
+      const src = typeof e.source === 'object' ? (e.source as { id: string }).id : e.source;
+      const tgt = typeof e.target === 'object' ? (e.target as { id: string }).id : e.target;
+      if (src === node.id) ids.add(tgt);
+      if (tgt === node.id) ids.add(src);
     }
     return ids;
   }, [node.id, allEdges]);
@@ -269,9 +276,13 @@ function Controls({ repos, selectedRepo, onRepoChange, domainIds, domainNames, h
             backgroundColor: 'var(--surface-elevated)',
             border: '1px solid var(--border)',
             borderRadius: '5px',
-            padding: '0.375rem 0.5rem',
+            padding: '0.375rem 1.75rem 0.375rem 0.5rem',
             outline: 'none',
             cursor: 'pointer',
+            appearance: 'none',
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23525252' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'right 0.5rem center',
           }}
         >
           <option value="">All repositories</option>
@@ -335,6 +346,66 @@ function Controls({ repos, selectedRepo, onRepoChange, domainIds, domainNames, h
   );
 }
 
+// ─── Zoom controls ──────────────────────────────────────────────────────────
+
+interface ZoomControlsProps {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onReset: () => void;
+}
+
+const zoomBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  color: 'var(--text-muted)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: '0.875rem',
+  padding: '0.375rem 0.625rem',
+  lineHeight: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: 'color 120ms',
+};
+
+function ZoomControls({ onZoomIn, onZoomOut, onReset }: ZoomControlsProps) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: '1rem',
+        right: '1rem',
+        zIndex: 10,
+        display: 'flex',
+        alignItems: 'center',
+        backgroundColor: 'rgba(20, 20, 20, 0.92)',
+        border: '1px solid var(--border)',
+        borderRadius: '6px',
+        backdropFilter: 'blur(8px)',
+        overflow: 'hidden',
+      }}
+    >
+      <button onClick={onZoomOut} style={zoomBtnStyle} aria-label="Zoom out" title="Zoom out">
+        −
+      </button>
+      <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--border)' }} />
+      <button
+        onClick={onReset}
+        style={{ ...zoomBtnStyle, minWidth: '46px', fontSize: '0.6875rem' }}
+        aria-label="Fit graph"
+        title="Fit graph"
+      >
+        Fit
+      </button>
+      <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--border)' }} />
+      <button onClick={onZoomIn} style={zoomBtnStyle} aria-label="Zoom in" title="Zoom in">
+        +
+      </button>
+    </div>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface DomainGraphProps {
@@ -353,6 +424,7 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
   const [selectedNode, setSelectedNode] = useState<RichNode | null>(null);
   const [hiddenDomains, setHiddenDomains] = useState<Set<string>>(new Set());
   const [canvasVisible, setCanvasVisible] = useState(false);
+  const zoomRef = useRef(1);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -419,11 +491,13 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
     return s;
   }, [hoveredId, data.edges]);
 
-  // react-force-graph-2d expects { nodes, links }
+  // react-force-graph-2d mutates link objects (source/target: string → object).
+  // Cloning prevents the mutation from corrupting TanStack Query's cached data,
+  // which would break the force simulation on every subsequent repo switch.
   const fgData = useMemo(
     () => ({
       nodes: richNodes,
-      links: data.edges,
+      links: data.edges.map((e) => ({ ...e })),
     }),
     [richNodes, data.edges],
   );
@@ -449,8 +523,8 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
       // Glow ring on hovered node
       if (n.id === hoveredId && !hidden) {
         const grd = ctx.createRadialGradient(x, y, r, x, y, r + 5);
-        grd.addColorStop(0, `${n.__color}55`);
-        grd.addColorStop(1, `${n.__color}00`);
+        grd.addColorStop(0, withAlpha(n.__color, 0.33));
+        grd.addColorStop(1, withAlpha(n.__color, 0));
         ctx.beginPath();
         ctx.arc(x, y, r + 5, 0, 2 * Math.PI);
         ctx.fillStyle = grd;
@@ -496,9 +570,9 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
     (link: any): string => {
       const srcId = typeof link.source === 'object' ? link.source?.id : link.source;
       const tgtId = typeof link.target === 'object' ? link.target?.id : link.target;
-      if (!hoveredId) return 'rgba(255,255,255,0.12)';
-      if (srcId === hoveredId || tgtId === hoveredId) return 'rgba(139,92,246,0.65)';
-      return 'rgba(255,255,255,0.04)';
+      if (!hoveredId) return 'rgba(255,255,255,0.22)';
+      if (srcId === hoveredId || tgtId === hoveredId) return 'rgba(139,92,246,0.75)';
+      return 'rgba(255,255,255,0.06)';
     },
     [hoveredId],
   );
@@ -535,6 +609,38 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
       else next.add(id);
       return next;
     });
+  }, []);
+
+  const handleZoom = useCallback(({ k }: { k: number; x: number; y: number }) => {
+    zoomRef.current = k;
+  }, []);
+
+  const onRenderFramePre = useCallback((ctx: CanvasRenderingContext2D) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    ctx.fillStyle = '#111116';
+    ctx.fillRect(0, 0, w, h);
+
+    // Fine grid (40 px)
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= w; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+    for (let y = 0; y <= h; y += 40) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    ctx.stroke();
+
+    // Coarse grid (200 px)
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= w; x += 200) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+    for (let y = 0; y <= h; y += 200) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    ctx.stroke();
+
+    ctx.restore();
   }, []);
 
   const handleEngineStop = useCallback(() => {
@@ -582,16 +688,18 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
           graphData={fgData}
           width={dimensions.width}
           height={dimensions.height}
-          backgroundColor="#0a0a0a"
+          backgroundColor="#111116"
           nodeId="id"
           nodeCanvasObject={nodeCanvasObject}
           nodeCanvasObjectMode={() => 'replace'}
           nodePointerAreaPaint={nodePointerAreaPaint}
           linkColor={linkColor}
-          linkWidth={1}
+          linkWidth={1.5}
           linkDirectionalArrowLength={0}
           warmupTicks={300}
           cooldownTicks={0}
+          onRenderFramePre={onRenderFramePre}
+          onZoom={handleZoom}
           onEngineStop={handleEngineStop}
           onNodeHover={handleNodeHover}
           onNodeClick={handleNodeClick}
@@ -611,6 +719,14 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
         onToggleDomain={toggleDomain}
         onResetView={handleResetView}
       />
+
+      {canvasVisible && (
+        <ZoomControls
+          onZoomIn={() => fgRef.current?.zoom(zoomRef.current * 1.25, 200)}
+          onZoomOut={() => fgRef.current?.zoom(zoomRef.current / 1.25, 200)}
+          onReset={handleResetView}
+        />
+      )}
 
       {selectedNode && (
         <>

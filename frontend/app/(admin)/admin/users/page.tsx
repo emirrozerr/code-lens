@@ -590,13 +590,13 @@ export default function UsersPage() {
                           <MoreHorizontal size={15} />
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => setResetTarget(u)}>
+                          <DropdownMenuItem onClick={() => setResetTarget(u)}>
                             Reset password
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={isSelf}
                             title={isSelf ? 'You cannot change your own role' : undefined}
-                            onSelect={() => !isSelf && setRoleTarget(u)}
+                            onClick={() => setRoleTarget(u)}
                           >
                             {u.role === 'admin' ? 'Demote to user' : 'Promote to admin'}
                           </DropdownMenuItem>
@@ -605,7 +605,7 @@ export default function UsersPage() {
                             variant="destructive"
                             disabled={isSelf}
                             title={isSelf ? 'You cannot delete your own account' : undefined}
-                            onSelect={() => !isSelf && setDeleteTarget(u)}
+                            onClick={() => setDeleteTarget(u)}
                           >
                             Delete
                           </DropdownMenuItem>
