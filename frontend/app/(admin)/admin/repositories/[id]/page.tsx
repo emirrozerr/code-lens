@@ -16,12 +16,12 @@ interface PageProps {
 export default function RepoDetailPage({ params }: PageProps) {
   const { id } = use(params);
 
-  const { data: repos = [], isLoading: reposLoading } = useQuery({
+  const { data: repos = [], isLoading: reposLoading, isError: reposError } = useQuery({
     queryKey: ['repos'],
     queryFn: listRepos,
   });
 
-  const { data: jobs = [], isLoading: jobsLoading } = useQuery({
+  const { data: jobs = [], isLoading: jobsLoading, isError: jobsError } = useQuery({
     queryKey: ['jobs', 50],
     queryFn: () => listJobs(50),
   });
@@ -33,6 +33,14 @@ export default function RepoDetailPage({ params }: PageProps) {
 
   const repo = repos.find((r) => r.id === id);
   const repoJobs = jobs.filter((j) => j.repoId === id);
+
+  if (reposError) {
+    return (
+      <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+        Failed to load repository data. Check your connection and try again.
+      </div>
+    );
+  }
 
   if (!reposLoading && !repo) {
     return (
@@ -251,7 +259,7 @@ export default function RepoDetailPage({ params }: PageProps) {
         >
           Indexing history
         </h2>
-        <JobsTable jobs={repoJobs} isLoading={jobsLoading} />
+        <JobsTable jobs={repoJobs} isLoading={jobsLoading} isError={jobsError} />
       </div>
     </div>
   );

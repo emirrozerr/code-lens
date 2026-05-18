@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { User } from '@/types/api';
@@ -33,7 +33,6 @@ function friendlyError(raw: string, status: number): string {
 // ─── Page ──────────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const reason = searchParams.get('reason');
@@ -74,17 +73,11 @@ export default function LoginPage() {
       return;
     }
 
-    const role = result.user.role;
-    if (role === 'admin') {
-      // Honour the `from` param only for admin-safe destinations
-      if (from && from.startsWith('/admin')) {
-        router.push('/admin/dashboard');
-      } else {
-        router.push('/admin/dashboard');
-      }
-    } else {
-      router.push('/ask');
-    }
+    // Full-page navigation so AuthProvider remounts and re-fetches /api/auth/me
+    // with the new cookie. Soft navigation (router.push) keeps the stale auth
+    // state from the previous session and triggers the "!user → /login" guard.
+    const dest = result.user.role === 'admin' ? '/admin/dashboard' : '/ask';
+    window.location.assign(dest);
   }
 
   return (

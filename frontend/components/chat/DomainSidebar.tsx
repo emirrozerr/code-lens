@@ -49,7 +49,7 @@ export function DomainSidebar({ onInsertPrompt }: DomainSidebarProps) {
       >
         <button
           onClick={() => setCollapsed(false)}
-          title="Expand domain browser"
+          aria-label="Expand domain browser"
           style={{
             width: '28px',
             height: '28px',
@@ -112,7 +112,7 @@ export function DomainSidebar({ onInsertPrompt }: DomainSidebarProps) {
         </span>
         <button
           onClick={() => setCollapsed(true)}
-          title="Collapse domain browser"
+          aria-label="Collapse domain browser"
           style={{
             width: '24px',
             height: '24px',
@@ -147,6 +147,7 @@ export function DomainSidebar({ onInsertPrompt }: DomainSidebarProps) {
           <input
             type="text"
             placeholder="Filter domains…"
+            aria-label="Filter domains"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{

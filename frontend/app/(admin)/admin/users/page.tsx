@@ -186,6 +186,7 @@ function AddUserDialog({ open, onOpenChange }: AddUserDialogProps) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoFocus
               />
             </div>
             <DialogFooter>
@@ -401,7 +402,7 @@ export default function UsersPage() {
   const [roleTarget, setRoleTarget] = useState<User | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
-  const { data: users = [], isLoading } = useQuery({
+  const { data: users = [], isLoading, isError } = useQuery({
     queryKey: ['users'],
     queryFn: listUsers,
     refetchOnWindowFocus: true,
@@ -492,6 +493,10 @@ export default function UsersPage() {
               <Skeleton key={i} className="h-10 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <div style={{ padding: '2rem', textAlign: 'center', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+            Failed to load users. Check your connection and try again.
+          </div>
         ) : (
           <Table>
             <TableHeader>
@@ -568,6 +573,7 @@ export default function UsersPage() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger
+                          aria-label={`Actions for ${u.email}`}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -584,13 +590,13 @@ export default function UsersPage() {
                           <MoreHorizontal size={15} />
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => setResetTarget(u)}>
+                          <DropdownMenuItem onClick={() => setResetTarget(u)}>
                             Reset password
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={isSelf}
                             title={isSelf ? 'You cannot change your own role' : undefined}
-                            onSelect={() => !isSelf && setRoleTarget(u)}
+                            onClick={() => setRoleTarget(u)}
                           >
                             {u.role === 'admin' ? 'Demote to user' : 'Promote to admin'}
                           </DropdownMenuItem>
@@ -599,7 +605,7 @@ export default function UsersPage() {
                             variant="destructive"
                             disabled={isSelf}
                             title={isSelf ? 'You cannot delete your own account' : undefined}
-                            onSelect={() => !isSelf && setDeleteTarget(u)}
+                            onClick={() => setDeleteTarget(u)}
                           >
                             Delete
                           </DropdownMenuItem>

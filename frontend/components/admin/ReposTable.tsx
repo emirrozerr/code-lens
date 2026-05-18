@@ -155,6 +155,7 @@ export function ReposTable({ repos, isLoading, onView, onReindex, onDelete }: Re
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger
+                        aria-label={`Actions for ${repo.name}`}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -171,14 +172,14 @@ export function ReposTable({ repos, isLoading, onView, onReindex, onDelete }: Re
                         <MoreHorizontal size={15} />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => onView(repo)}>
+                        <DropdownMenuItem onClick={() => onView(repo)}>
                           View detail
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => onReindex(repo)}>
+                        <DropdownMenuItem onClick={() => onReindex(repo)}>
                           Re-index
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem variant="destructive" onSelect={() => onDelete(repo)}>
+                        <DropdownMenuItem variant="destructive" onClick={() => onDelete(repo)}>
                           Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>

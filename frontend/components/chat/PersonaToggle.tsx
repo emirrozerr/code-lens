@@ -37,7 +37,7 @@ export function PersonaToggle({ value, onChange }: PersonaToggleProps) {
   const hoveredOption = OPTIONS.find((o) => o.value === hovered);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
       {/* Segmented control */}
       <div
         style={{
@@ -76,15 +76,25 @@ export function PersonaToggle({ value, onChange }: PersonaToggleProps) {
         })}
       </div>
 
-      {/* Hover description */}
+      {/* Hover description — floats below the header, doesn't affect layout */}
       <div
         style={{
-          height: '1rem',
+          position: 'absolute',
+          top: 'calc(100% + 8px)',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          whiteSpace: 'nowrap',
           fontFamily: 'var(--font-sans)',
-          fontSize: '0.6875rem',
-          color: 'var(--text-dim)',
+          fontSize: '0.75rem',
+          color: 'var(--text-muted)',
+          backgroundColor: 'var(--surface-elevated)',
+          border: '1px solid var(--border)',
+          borderRadius: '6px',
+          padding: '0.3rem 0.625rem',
+          pointerEvents: 'none',
           transition: 'opacity 150ms',
           opacity: hoveredOption ? 1 : 0,
+          zIndex: 50,
         }}
       >
         {hoveredOption?.desc ?? ''}

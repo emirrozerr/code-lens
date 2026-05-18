@@ -23,7 +23,7 @@ export default function DomainsPage() {
 
   const domainQueryKey = ['domains', repoFilter];
 
-  const { data: domains = [], isLoading: domainsLoading } = useQuery({
+  const { data: domains = [], isLoading: domainsLoading, isError: domainsError } = useQuery({
     queryKey: domainQueryKey,
     queryFn: () => listDomains(repoFilter || undefined),
     refetchOnWindowFocus: true,
@@ -142,10 +142,14 @@ export default function DomainsPage() {
             backgroundColor: 'var(--surface)',
             border: '1px solid var(--border)',
             borderRadius: '6px',
-            padding: '0.375rem 0.75rem',
+            padding: '0.375rem 2rem 0.375rem 0.75rem',
             cursor: 'pointer',
             outline: 'none',
             minWidth: '180px',
+            appearance: 'none',
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23525252' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'right 0.625rem center',
           }}
         >
           <option value="">All repositories</option>
@@ -158,7 +162,11 @@ export default function DomainsPage() {
       </div>
 
       {/* Domain grid */}
-      {domainsLoading ? (
+      {domainsError ? (
+        <div style={{ padding: '0.75rem 1rem', backgroundColor: 'var(--surface)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--danger)' }}>
+          Failed to load domains. Check your connection and try again.
+        </div>
+      ) : domainsLoading ? (
         <div
           style={{
             display: 'grid',

@@ -79,6 +79,13 @@ export default function AskPage() {
     }
   }, [loading, user, router]);
 
+  // Cancel any active stream when the component unmounts
+  useEffect(() => {
+    return () => {
+      activeStreamRef.current?.cancel();
+    };
+  }, []);
+
   // G keyboard shortcut → navigate to graph (skip when textarea focused)
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -609,7 +616,7 @@ export default function AskPage() {
                   justifyContent: 'center',
                   flexShrink: 0,
                 }}
-                title="Cancel"
+                aria-label="Cancel"
               >
                 <Square size={14} />
               </button>
@@ -617,6 +624,7 @@ export default function AskPage() {
               <button
                 onClick={() => submitMessage(inputValue)}
                 disabled={!inputValue.trim() || isStreaming}
+                aria-label="Send message"
                 style={{
                   width: '38px',
                   height: '38px',
