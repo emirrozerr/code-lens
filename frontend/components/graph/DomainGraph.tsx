@@ -366,6 +366,23 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
     return () => obs.disconnect();
   }, []);
 
+  // Reset transient state when dataset changes (repo switch)
+  useEffect(() => {
+    setSelectedNode(null);
+    setHiddenDomains(new Set());
+    setHoveredId(null);
+  }, [data]);
+
+  // ESC closes the side panel
+  useEffect(() => {
+    if (!selectedNode) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedNode(null);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedNode]);
+
   const domainIds = useMemo(
     () => [...new Set(data.nodes.map((n) => n.domainId))].sort(),
     [data.nodes],
@@ -524,6 +541,13 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
     setCanvasVisible(true);
     setTimeout(() => fgRef.current?.zoomToFit(400, 80), 50);
   }, []);
+
+  // On repo switch the canvas is already visible; re-fit after simulation settles
+  useEffect(() => {
+    if (!canvasVisible) return;
+    const timer = setTimeout(() => fgRef.current?.zoomToFit(400, 80), 400);
+    return () => clearTimeout(timer);
+  }, [data, canvasVisible]);
 
   return (
     <div
