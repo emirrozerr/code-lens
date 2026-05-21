@@ -77,7 +77,7 @@ export default function LoginPage() {
     // with the new cookie. Soft navigation (router.push) keeps the stale auth
     // state from the previous session and triggers the "!user → /login" guard.
     const dest = result.user.role === 'admin' ? '/admin/dashboard' : '/ask';
-    window.location.assign(dest);
+    window.location.assign(from || dest);
   }
 
   return (
