@@ -33,3 +33,6 @@ tests/fixtures/spring-petclinic/
 
 # Temporary files
 /tmp/
+
+# Claude code local settings
+.claude/
