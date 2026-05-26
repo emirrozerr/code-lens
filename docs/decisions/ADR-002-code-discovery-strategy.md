@@ -90,9 +90,9 @@ Agents primarily bring their own entry points. CodeLens also exposes a lightweig
 
 ## Decision
 
-**Option 3 — Agent-Led Discovery with domain browsing as the non-technical entry point — is adopted for the MVP.**
+**Option 4 — Hybrid: Agent-Led Primary, Keyword as Fallback (using Neo4j Lucene Index) — is adopted.**
 
-Vector embeddings are explicitly excluded from the MVP scope. Keyword search is not implemented in this phase.
+Vector embeddings are explicitly excluded to keep the system lightweight and low-cost. However, a native Neo4j Lucene full-text index is implemented for keyword search (`search_nodes` MCP tool) to assist the agent in discovering entry points when its own tools are insufficient.
 
 **Primary reasons:**
 
@@ -110,17 +110,16 @@ Vector embeddings are explicitly excluded from the MVP scope. Keyword search is 
 
 **We accept:**
 - Synonym and semantic variation in queries may not be matched — an agent querying "reduction" will not automatically discover "discount" unless it reformulates the query
-- Cross-cutting conceptual discovery ("find all external API calls") is not supported in MVP — the agent must know or find the relevant symbols first
-- Non-technical users in the demo UI have domain browsing only — they cannot issue arbitrary natural language code queries without first selecting a domain
+- Cross-cutting conceptual discovery ("find all external API calls") is limited to keyword presence.
 
 **We gain:**
 - No embedding model dependency at index time
-- No vector index infrastructure
-- CodeLens MCP tools remain focused and structurally precise
-- The indexing pipeline is simpler and faster
+- No vector index infrastructure, zero extra costs
+- Fast, deterministic discovery mechanism (`search_nodes`) to complement agent-led entry points.
+- The indexing pipeline is simple and fast.
 
 **Upgrade path:**
-Full-text keyword search (Option 2) is the recommended first upgrade — it requires only enabling Neo4j's built-in Lucene index with no external dependencies. Vector embeddings (Option 1) are the recommended second upgrade if synonym handling proves to be a recurring user complaint once the product is in use.
+Vector embeddings (Option 1) are the recommended future upgrade if synonym handling proves to be a recurring user complaint once the product is in use.
 
 ---
 
@@ -129,6 +128,7 @@ Full-text keyword search (Option 2) is the recommended first upgrade — it requ
 This decision shapes the MCP tool surface. Tools are traversal-oriented, not search-oriented:
 
 ```python
+search_nodes(keyword)              # Full-text Lucene search on node names and docstrings
 get_code_context(symbol_name)      # subgraph around a function or class
 get_callers(symbol_name)           # what calls this symbol
 get_callees(symbol_name)           # what this symbol calls

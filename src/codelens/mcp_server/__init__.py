@@ -1,1 +1,6 @@
-"""MCP Server — Model Context Protocol tool handlers for code graph traversal."""
+"""
+CodeLens MCP Server Package
+"""
+from codelens.mcp_server.server import mcp
+
+__all__ = ["mcp"]
