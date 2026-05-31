@@ -47,8 +47,6 @@ class Neo4jClient:
         with self.session() as session:
             for label in labels:
                 constraint_name = f"unique_uid_{label.lower()}"
-                
-                # Check if constraint exists, create if not
                 query = f"""
                 CREATE CONSTRAINT {constraint_name} IF NOT EXISTS
                 FOR (n:{label}) REQUIRE n.uid IS UNIQUE
@@ -57,6 +55,16 @@ class Neo4jClient:
                     session.run(query)
                 except Exception as e:
                     logger.warning(f"Could not create constraint for {label}: {e}")
+
+            # Fulltext index for search_nodes tool
+            try:
+                session.run("""
+                    CREATE FULLTEXT INDEX node_search IF NOT EXISTS
+                    FOR (n:Class|Function|Interface|Constructor)
+                    ON EACH [n.name, n.docstring, n.signature, n.filepath]
+                """)
+            except Exception as e:
+                logger.warning(f"Could not create fulltext index: {e}")
 
         logger.info("Schema setup complete.")
 

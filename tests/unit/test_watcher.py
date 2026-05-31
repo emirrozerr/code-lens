@@ -209,3 +209,102 @@ class TestWatcherDaemonExecution:
         assert set(args[2]) == {Path("/fake/repo/A.java"), Path("/fake/repo/B.java")}
         assert set(args[3]) == {Path("/fake/repo/C.java")}
 
+
+class TestWatcherNeo4jSync:
+    """Test that _sync_to_neo4j calls the Neo4jClient correctly."""
+
+    def _make_daemon(self, tmp_path):
+        """Helper: daemon with a mocked Neo4j client and a minimal in-memory result."""
+        from unittest.mock import MagicMock
+        from codelens.indexer.models import ParseResult, CodeNode, CodeEdge, NodeType, EdgeType
+
+        daemon = WatcherDaemon(tmp_path)
+        daemon._neo4j = MagicMock()
+
+        # Populate in-memory state with one node and one edge for a fake file
+        rel = "src/Foo.java"
+        node = CodeNode(
+            uid=f"{rel}:Foo",
+            name="Foo",
+            qualified_name="Foo",
+            node_type=NodeType.CLASS,
+            filepath=rel,
+            start_line=1,
+            end_line=10,
+        )
+        edge = CodeEdge(
+            source_uid=f"{rel}:Foo",
+            target_uid="unresolved:Bar",
+            edge_type=EdgeType.CALLS,
+            filepath=rel,
+            line=5,
+        )
+        result = ParseResult(filepath=str(tmp_path))
+        result.nodes = [node]
+        result.edges = [edge]
+        daemon.current_result = result
+        return daemon, rel
+
+    def test_sync_deleted_calls_delete_subgraph(self, tmp_path):
+        daemon, rel = self._make_daemon(tmp_path)
+        deleted_abs = tmp_path / rel
+
+        daemon._sync_to_neo4j(changed=set(), deleted={deleted_abs})
+
+        daemon._neo4j.delete_file_subgraph.assert_called_once_with(rel)
+        daemon._neo4j.ingest_parse_result.assert_not_called()
+
+    def test_sync_changed_deletes_then_reingests(self, tmp_path):
+        daemon, rel = self._make_daemon(tmp_path)
+        changed_abs = tmp_path / rel
+
+        daemon._sync_to_neo4j(changed={changed_abs}, deleted=set())
+
+        daemon._neo4j.delete_file_subgraph.assert_called_once_with(rel)
+        daemon._neo4j.ingest_parse_result.assert_called_once()
+
+        ingested: ParseResult = daemon._neo4j.ingest_parse_result.call_args[0][0]
+        assert len(ingested.nodes) == 1
+        assert ingested.nodes[0].filepath == rel
+        assert len(ingested.edges) == 1
+
+    def test_sync_no_op_when_neo4j_is_none(self, tmp_path):
+        daemon, rel = self._make_daemon(tmp_path)
+        daemon._neo4j = None
+        changed_abs = tmp_path / rel
+
+        # Should not raise, should do nothing
+        daemon._sync_to_neo4j(changed={changed_abs}, deleted=set())
+
+    def test_sync_changed_excludes_unrelated_nodes(self, tmp_path):
+        """Nodes from other files must not be included in the mini ParseResult."""
+        from unittest.mock import MagicMock
+        from codelens.indexer.models import ParseResult, CodeNode, NodeType
+
+        daemon = WatcherDaemon(tmp_path)
+        daemon._neo4j = MagicMock()
+
+        rel_changed = "src/Foo.java"
+        rel_other = "src/Bar.java"
+
+        def make_node(rel, name):
+            return CodeNode(
+                uid=f"{rel}:{name}",
+                name=name,
+                qualified_name=name,
+                node_type=NodeType.CLASS,
+                filepath=rel,
+                start_line=1,
+                end_line=5,
+            )
+
+        result = ParseResult(filepath=str(tmp_path))
+        result.nodes = [make_node(rel_changed, "Foo"), make_node(rel_other, "Bar")]
+        result.edges = []
+        daemon.current_result = result
+
+        daemon._sync_to_neo4j(changed={tmp_path / rel_changed}, deleted=set())
+
+        ingested: ParseResult = daemon._neo4j.ingest_parse_result.call_args[0][0]
+        assert len(ingested.nodes) == 1
+        assert ingested.nodes[0].name == "Foo"

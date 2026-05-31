@@ -114,6 +114,9 @@ def watch(repo_path: str, verbose: bool):
     """Start a background daemon to incrementally index a repository.
 
     REPO_PATH is the path to the repository root to watch.
+
+    Note: run 'codelens ingest REPO_PATH' first to populate Neo4j.
+    This command only syncs incremental changes, not the full graph.
     """
     _setup_logging(verbose)
     from codelens.watcher import WatcherDaemon
