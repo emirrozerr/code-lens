@@ -34,5 +34,10 @@ tests/fixtures/spring-petclinic/
 # Temporary files
 /tmp/
 
+# Runtime SQLite database (auto-created on first run)
+codelens.db
+codelens.db-shm
+codelens.db-wal
+
 # Claude code local settings
 .claude/

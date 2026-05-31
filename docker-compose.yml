@@ -21,22 +21,46 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  mcp-server:
+  api:
     build: .
-    container_name: codelens-mcp
+    container_name: codelens-api
     ports:
       - "8000:8000"
     environment:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-codelens_dev}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change_me_to_a_random_secret}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_EXPIRY_MINUTES=${JWT_EXPIRY_MINUTES:-1440}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       neo4j:
         condition: service_healthy
     volumes:
-      # Mount the host directory to /app so the indexer has access to host files
-      # if we want to run 'codelens index' from within the container
       - .:/app
+    command: codelens api --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+
+  # MCP server runs on stdio by default (used by AI clients like Claude Desktop).
+  # Uncomment below to also expose it over SSE on port 8001.
+  #
+  # mcp-server:
+  #   build: .
+  #   container_name: codelens-mcp
+  #   ports:
+  #     - "8001:8001"
+  #   environment:
+  #     - NEO4J_URI=bolt://neo4j:7687
+  #     - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+  #     - NEO4J_PASSWORD=${NEO4J_PASSWORD:-codelens_dev}
+  #   depends_on:
+  #     neo4j:
+  #       condition: service_healthy
+  #   volumes:
+  #     - .:/app
+  #   command: codelens mcp --transport sse --host 0.0.0.0 --port 8001
 
 volumes:
   neo4j_data:

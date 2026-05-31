@@ -12,6 +12,8 @@ from pathlib import Path
 
 from codelens.indexer.java_parser import JavaParser
 from codelens.indexer.python_parser import PythonParser
+from codelens.indexer.javascript_parser import JavaScriptParser
+from codelens.indexer.typescript_parser import TypeScriptParser
 from codelens.indexer.models import CodeEdge, CodeNode, EdgeType, NodeType, ParseResult
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,12 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".java": "java",
     ".py": "python",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
 }
 
 
@@ -29,6 +37,8 @@ class Indexer:
     def __init__(self) -> None:
         self._java_parser = JavaParser()
         self._python_parser = PythonParser()
+        self._js_parser = JavaScriptParser()
+        self._ts_parser = TypeScriptParser()
 
     def index_repository(self, repo_path: Path) -> ParseResult:
         """Index an entire repository, returning a combined ParseResult.
@@ -52,21 +62,19 @@ class Indexer:
             ext = source_file.suffix.lower()
             lang = SUPPORTED_EXTENSIONS.get(ext)
 
+            parser = None
             if lang == "java":
-                try:
-                    file_result = self._java_parser.parse_file(source_file, repo_path)
-                    combined.nodes.extend(file_result.nodes)
-                    combined.edges.extend(file_result.edges)
-                    combined.errors.extend(file_result.errors)
-                    files_parsed += 1
-                except Exception as exc:
-                    msg = f"Failed to parse {source_file}: {exc}"
-                    logger.warning(msg)
-                    combined.errors.append(msg)
-                    files_skipped += 1
+                parser = self._java_parser
             elif lang == "python":
+                parser = self._python_parser
+            elif lang == "javascript":
+                parser = self._js_parser
+            elif lang == "typescript":
+                parser = self._ts_parser
+
+            if parser:
                 try:
-                    file_result = self._python_parser.parse_file(source_file, repo_path)
+                    file_result = parser.parse_file(source_file, repo_path)
                     combined.nodes.extend(file_result.nodes)
                     combined.edges.extend(file_result.edges)
                     combined.errors.extend(file_result.errors)
@@ -146,20 +154,19 @@ class Indexer:
             ext = source_file.suffix.lower()
             lang = SUPPORTED_EXTENSIONS.get(ext)
 
+            inc_parser = None
             if lang == "java":
-                try:
-                    file_result = self._java_parser.parse_file(source_file, repo_path)
-                    new_result.nodes.extend(file_result.nodes)
-                    new_result.edges.extend(file_result.edges)
-                    new_result.errors.extend(file_result.errors)
-                    files_parsed += 1
-                except Exception as exc:
-                    msg = f"Failed to parse {source_file}: {exc}"
-                    logger.warning(msg)
-                    new_result.errors.append(msg)
+                inc_parser = self._java_parser
             elif lang == "python":
+                inc_parser = self._python_parser
+            elif lang == "javascript":
+                inc_parser = self._js_parser
+            elif lang == "typescript":
+                inc_parser = self._ts_parser
+
+            if inc_parser:
                 try:
-                    file_result = self._python_parser.parse_file(source_file, repo_path)
+                    file_result = inc_parser.parse_file(source_file, repo_path)
                     new_result.nodes.extend(file_result.nodes)
                     new_result.edges.extend(file_result.edges)
                     new_result.errors.extend(file_result.errors)

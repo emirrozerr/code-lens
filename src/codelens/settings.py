@@ -13,6 +13,9 @@ class Settings(BaseSettings):
 
     # LLM
     gemini_api_key: str = ""
+    groq_api_key: str = ""
+    groq_model_fast: str = "llama-3.1-8b-instant"
+    groq_model_quality: str = "llama-3.3-70b-versatile"
 
     # JWT
     jwt_secret_key: str = "change_me_to_a_random_secret"

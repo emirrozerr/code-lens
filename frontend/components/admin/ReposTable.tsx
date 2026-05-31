@@ -39,10 +39,13 @@ const STATUS_STYLES: Record<
 
 function StatusPill({ status }: { status: Repository['status'] }) {
   const s = STATUS_STYLES[status];
+  const isLive = status === 'indexing' || status === 'pending';
   return (
     <span
       style={{
-        display: 'inline-block',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.35rem',
         padding: '0.125rem 0.5rem',
         borderRadius: '999px',
         fontFamily: 'var(--font-mono)',
@@ -52,6 +55,18 @@ function StatusPill({ status }: { status: Repository['status'] }) {
         border: `1px solid ${s.border}`,
       }}
     >
+      {isLive && (
+        <span
+          style={{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            backgroundColor: s.color,
+            animation: 'pulse 1.2s ease-in-out infinite',
+            flexShrink: 0,
+          }}
+        />
+      )}
       {s.label}
     </span>
   );
