@@ -7,22 +7,28 @@ plain-English summary of what that business domain does.
 
 import logging
 import networkx as nx
-import community as community_louvain # python-louvain
+import community as community_louvain  # python-louvain
 
 from typing import Dict, List, Any
 from codelens.graph.neo4j_client import Neo4jClient
-from google import genai
 
 logger = logging.getLogger(__name__)
 
 
 class DomainClusterer:
     def __init__(self, api_key: str = None):
+        # api_key kept for backwards compat but Groq is now the LLM backend
         self.api_key = api_key
-        # We initialize the Gemini client if an API key is provided
-        self.client = genai.Client(api_key=api_key) if api_key else None
+        self._groq_client = None
+        try:
+            from codelens.settings import settings
+            if settings.groq_api_key:
+                from groq import Groq
+                self._groq_client = Groq(api_key=settings.groq_api_key)
+        except Exception:
+            pass
 
-    def run_clustering(self):
+    def run_clustering(self, repo_id: str = "default"):
         """Main pipeline for clustering the Neo4j graph into domains."""
         logger.info("Extracting structural graph from Neo4j...")
         G, node_info = self._extract_graph_from_neo4j()
@@ -44,37 +50,37 @@ class DomainClusterer:
         
         domains_data = []
         for c_id, members in clusters.items():
-            # Skip tiny clusters (e.g., just 1-2 unconnected functions)
-            if len(members) < 3:
+            # Skip singleton clusters
+            if len(members) < 2:
                 continue
                 
-            domain_name = f"Domain_{c_id}"
-            
+            cluster_id = f"Domain_{c_id}"
+
             # Prepare context for the LLM
             signatures = []
             for m in members:
                 info = node_info.get(m, {})
-                name = info.get("name", m)
+                node_name = info.get("name", m)
                 sig = info.get("signature", "")
                 if sig:
-                    signatures.append(f"- {name}: {sig}")
+                    signatures.append(f"- {node_name}: {sig}")
                 else:
-                    signatures.append(f"- {name}")
-            
+                    signatures.append(f"- {node_name}")
+
             context_text = "\n".join(signatures)
-            
-            logger.info(f"Summarizing {domain_name} ({len(members)} nodes)...")
-            summary = self._generate_domain_summary(domain_name, context_text)
-            
+
+            logger.info(f"Naming and summarizing cluster {c_id} ({len(members)} nodes)...")
+            domain_name, summary = self._generate_domain_name_and_summary(cluster_id, context_text)
+
             domains_data.append({
-                "uid": domain_name,
-                "name": f"Domain {c_id}",
+                "uid": cluster_id,
+                "name": domain_name,
                 "summary": summary,
                 "members": members
             })
             
         logger.info("Saving domains to Neo4j...")
-        self._save_domains_to_neo4j(domains_data)
+        self._save_domains_to_neo4j(domains_data, repo_id=repo_id)
         logger.info("Clustering complete!")
         return domains_data
 
@@ -117,55 +123,86 @@ class DomainClusterer:
             
         return G, node_info
 
-    def _generate_domain_summary(self, domain_id: str, context: str) -> str:
-        """Call the LLM to generate a plain English summary of the domain."""
-        if not self.client:
-            # Fallback if no API key is provided
-            return f"Mock summary for {domain_id}. (Set Gemini API key to generate real summaries). Contains:\n{context[:100]}..."
-            
-        prompt = f"""
-        You are an expert software architect analyzing a codebase.
-        I used community detection algorithms to group related code functions and classes into a cluster.
-        Based on the following list of signatures from this cluster, write a brief, 1-2 sentence 
-        plain-English summary explaining what business logic or system domain this cluster handles.
-        
-        Signatures:
-        {context}
-        
-        Provide only the summary. No introductory text.
-        """
-        
-        try:
-            response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-            )
-            return response.text.strip()
-        except Exception as e:
-            logger.error(f"LLM API Error: {e}")
-            return f"Error generating summary: {e}"
+    def _generate_domain_name_and_summary(self, domain_id: str, context: str) -> tuple[str, str]:
+        """Call Groq to generate a short Turkish domain name and a summary.
 
-    def _save_domains_to_neo4j(self, domains_data: List[Dict]):
+        Returns (name, summary). Falls back to (domain_id, plain context) if no key.
+        """
+        if not self._groq_client:
+            fallback_name = domain_id.replace("_", " ").title()
+            fallback_summary = f"Üyeler:\n{context[:300]}"
+            return fallback_name, fallback_summary
+
+        prompt = (
+            "You are a software architect. Below are function and class signatures from a code cluster.\n\n"
+            f"Signatures:\n{context}\n\n"
+            "For this cluster:\n"
+            "1. Generate a short, meaningful English name (2-4 words, e.g. 'Blog Management', 'User Authentication')\n"
+            "2. Write a 1-2 sentence English description of what this cluster does\n\n"
+            "Reply in exactly this format:\n"
+            "NAME: <short name>\n"
+            "SUMMARY: <1-2 sentence description>"
+        )
+
+        try:
+            from codelens.settings import settings
+            response = self._groq_client.chat.completions.create(
+                model=settings.groq_model_quality,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                temperature=0.3,
+            )
+            text = response.choices[0].message.content.strip()
+
+            name, summary = domain_id, text
+            for line in text.splitlines():
+                if line.upper().startswith("NAME:"):
+                    name = line.split(":", 1)[1].strip()
+                elif line.upper().startswith("SUMMARY:"):
+                    summary = line.split(":", 1)[1].strip()
+            return name, summary
+
+        except Exception as exc:
+            logger.error("Groq API error: %s", exc)
+            return domain_id, f"Özet üretilemedi: {exc}"
+
+    def _generate_domain_summary(self, domain_id: str, context: str) -> str:
+        """Backwards-compat wrapper used by the regenerate API endpoint."""
+        _, summary = self._generate_domain_name_and_summary(domain_id, context)
+        return summary
+
+    def _save_domains_to_neo4j(self, domains_data: List[Dict], repo_id: str = "default"):
         """Persist the Domain nodes and IN_DOMAIN edges to Neo4j."""
         client = Neo4jClient()
         try:
             with client.session() as session:
-                # Clear existing domains so we don't duplicate
-                session.run("MATCH (d:Domain) DETACH DELETE d")
-                
+                # Clear only this repo's existing domains to avoid duplicates
+                session.run(
+                    "MATCH (d:Domain) WHERE coalesce(d.repo_id, 'default') = $rid DETACH DELETE d",
+                    rid=repo_id,
+                )
+
                 for domain in domains_data:
-                    # Create the Domain node
-                    session.run("""
+                    session.run(
+                        """
                         MERGE (d:Domain {uid: $uid})
-                        SET d.name = $name, d.summary = $summary
-                    """, uid=domain["uid"], name=domain["name"], summary=domain["summary"])
-                    
-                    # Create the IN_DOMAIN edges for all members
-                    session.run("""
+                        SET d.name = $name, d.summary = $summary, d.repo_id = $repo_id
+                        """,
+                        uid=domain["uid"],
+                        name=domain["name"],
+                        summary=domain["summary"],
+                        repo_id=repo_id,
+                    )
+
+                    session.run(
+                        """
                         UNWIND $members AS member_uid
                         MATCH (n) WHERE n.uid = member_uid
                         MATCH (d:Domain {uid: $domain_uid})
                         MERGE (n)-[:IN_DOMAIN]->(d)
-                    """, members=domain["members"], domain_uid=domain["uid"])
+                        """,
+                        members=domain["members"],
+                        domain_uid=domain["uid"],
+                    )
         finally:
             client.close()

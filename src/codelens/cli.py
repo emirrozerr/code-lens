@@ -234,6 +234,30 @@ def mcp(verbose: bool, transport: str, host: str, port: int):
             traceback.print_exc()
 
 # ---------------------------------------------------------------------------
+# api command
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+@click.option("--host", default="127.0.0.1", help="Host binding.")
+@click.option("--port", default=8000, type=int, help="Port to listen on.")
+def api(verbose: bool, host: str, port: int):
+    """Start the REST API server (FastAPI + Uvicorn).
+
+    This exposes the full HTTP API consumed by the Next.js frontend.
+    """
+    _setup_logging(verbose)
+    import uvicorn
+    from codelens.api import app
+
+    click.echo("\n  CodeLens REST API")
+    click.echo(f"  {'─' * 40}")
+    click.echo(f"  Listening on http://{host}:{port}\n")
+
+    uvicorn.run(app, host=host, port=port, log_level="info" if not verbose else "debug")
+
+
+# ---------------------------------------------------------------------------
 # Pretty printing
 # ---------------------------------------------------------------------------
 
