@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from codelens.graph.neo4j_client import Neo4jClient
 from codelens.indexer.indexer import Indexer
 from codelens.indexer.models import ParseResult
 
@@ -80,24 +81,35 @@ class WatcherDaemon:
         self.observer = Observer()
         self.current_result: ParseResult | None = None
         self._running = False
+        self._neo4j: Neo4jClient | None = None  # opened in start(), closed in stop()
 
     def start(self):
         """Start the watcher daemon."""
         if not self.repo_path.is_dir():
             raise ValueError(f"Repository path does not exist: {self.repo_path}")
 
-        # 1. Initial full index
+        # 1. Initial full index (in-memory, for call resolution state)
         logger.info("Starting initial index of %s...", self.repo_path)
         self.current_result = self.indexer.index_repository(self.repo_path)
         logger.info("Initial index complete. Starting file watcher...")
 
-        # 2. Start watchdog
+        # 2. Open Neo4j connection (best-effort — watcher still works without it)
+        try:
+            self._neo4j = Neo4jClient()
+            logger.info("Connected to Neo4j for incremental sync.")
+        except Exception as e:
+            logger.warning(
+                "Could not connect to Neo4j (%s). File changes will not be persisted to graph.", e
+            )
+            self._neo4j = None
+
+        # 3. Start watchdog
         event_handler = CodeLensEventHandler(self.event_queue)
         self.observer.schedule(event_handler, str(self.repo_path), recursive=True)
         self.observer.start()
         self._running = True
 
-        # 3. Enter processing loop
+        # 4. Enter processing loop
         try:
             self._process_loop()
         except KeyboardInterrupt:
@@ -110,6 +122,9 @@ class WatcherDaemon:
         if self.observer.is_alive():
             self.observer.stop()
             self.observer.join()
+        if self._neo4j is not None:
+            self._neo4j.close()
+            self._neo4j = None
 
     def _process_loop(self):
         """Consume events from the queue, debounce, and trigger incremental updates."""
@@ -147,6 +162,57 @@ class WatcherDaemon:
                             list(changed),
                             list(deleted),
                         )
+                        self._sync_to_neo4j(changed, deleted)
 
             except Empty:
                 continue
+
+    def _sync_to_neo4j(self, changed: set[Path], deleted: set[Path]) -> None:
+        """Persist incremental changes to Neo4j. No-op if Neo4j is not connected."""
+        if self._neo4j is None:
+            return
+
+        # Convert absolute paths to relative filepaths (same format parsers use)
+        def to_rel(p: Path) -> str:
+            try:
+                return str(p.resolve().relative_to(self.repo_path))
+            except ValueError:
+                return str(p)
+
+        # 1. Purge deleted files from Neo4j
+        for path in deleted:
+            rel = to_rel(path)
+            try:
+                self._neo4j.delete_file_subgraph(rel)
+                logger.info("Neo4j: deleted subgraph for %s", rel)
+            except Exception as e:
+                logger.warning("Neo4j: failed to delete subgraph for %s: %s", rel, e)
+
+        # 2. For changed files: purge old data, then write fresh data
+        if changed and self.current_result is not None:
+            changed_rels = {to_rel(p) for p in changed}
+
+            # Purge old subgraphs
+            for rel in changed_rels:
+                try:
+                    self._neo4j.delete_file_subgraph(rel)
+                    logger.debug("Neo4j: purged old subgraph for %s", rel)
+                except Exception as e:
+                    logger.warning("Neo4j: failed to purge old subgraph for %s: %s", rel, e)
+
+            # Build a mini ParseResult with only the changed files' nodes and edges
+            mini = ParseResult(filepath=str(self.repo_path))
+            mini.nodes = [n for n in self.current_result.nodes if n.filepath in changed_rels]
+            mini.edges = [e for e in self.current_result.edges if e.filepath in changed_rels]
+
+            if mini.nodes or mini.edges:
+                try:
+                    self._neo4j.ingest_parse_result(mini)
+                    logger.info(
+                        "Neo4j: synced %d nodes, %d edges for %d changed file(s)",
+                        len(mini.nodes),
+                        len(mini.edges),
+                        len(changed_rels),
+                    )
+                except Exception as e:
+                    logger.warning("Neo4j: failed to ingest updated subgraph: %s", e)
