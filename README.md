@@ -201,3 +201,21 @@ Once the MCP server is running and configured in your AI client, these tools bec
 | 3 -- Intelligence | Domain clustering (Leiden), LLM domain summaries | ⬜ Planned |
 | 4 -- Auth + UI | JWT auth, admin panel, demo interface | ⬜ Planned |
 | 5 -- Testing + Docs | Full pytest suite, CI, documentation, final report | ⬜ Planned |
+
+## Code Style
+
+The project uses Ruff for Python linting and import organization.
+
+Before opening a pull request, run:
+
+```bash
+ruff check .
+```
+
+To automatically fix supported issues:
+
+```bash
+ruff check . --fix
+```
+
+Contributors are encouraged to use the repository's `.editorconfig` settings to maintain consistent formatting across editors and operating systems.
