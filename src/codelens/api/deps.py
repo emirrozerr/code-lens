@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 from fastapi import Cookie, Depends, HTTPException, status
 from jose import JWTError, jwt
 
 from codelens.settings import settings
 from codelens.api import store
+from codelens.api.store import Row
 
 
 def _decode_token(token: str) -> dict:
@@ -18,7 +17,7 @@ def _decode_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
 
-def current_user(codelens_token: str | None = Cookie(default=None)) -> sqlite3.Row:
+def current_user(codelens_token: str | None = Cookie(default=None)) -> Row:
     if not codelens_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     payload = _decode_token(codelens_token)
@@ -31,7 +30,7 @@ def current_user(codelens_token: str | None = Cookie(default=None)) -> sqlite3.R
     return user
 
 
-def admin_user(user=Depends(current_user)) -> sqlite3.Row:
+def admin_user(user=Depends(current_user)) -> Row:
     if user["role"] != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user

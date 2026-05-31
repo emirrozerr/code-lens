@@ -29,7 +29,7 @@ def _make_token(user_id: str, email: str, role: str) -> str:
     )
 
 
-def _user_dict(row: store.sqlite3.Row) -> dict:
+def _user_dict(row: dict) -> dict:
     return {
         "id": row["id"],
         "email": row["email"],

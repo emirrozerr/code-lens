@@ -18,7 +18,11 @@ def _neo4j_node_count() -> int:
         from codelens.graph.neo4j_client import Neo4jClient
         client = Neo4jClient()
         with client.session() as session:
-            row = session.run("MATCH (n) WHERE NOT n:Domain RETURN count(n) AS c").single()
+            row = session.run(
+                "MATCH (n) WHERE NOT n:Domain AND NOT n:User "
+                "AND NOT n:Repository AND NOT n:IndexingJob "
+                "RETURN count(n) AS c"
+            ).single()
             return row["c"] if row else 0
     except Exception:
         return 0
