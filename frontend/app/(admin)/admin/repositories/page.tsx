@@ -160,9 +160,8 @@ export default function RepositoriesPage() {
     queryKey: ['repos'],
     queryFn: listRepos,
     refetchOnWindowFocus: true,
-    // Auto-poll every 2s while any repo is indexing
     refetchInterval: (query) => {
-      const data = query.state.data as typeof repos | undefined;
+      const data = query.state.data as Repository[] | undefined;
       return data?.some((r) => r.status === 'indexing') ? 2000 : false;
     },
   });

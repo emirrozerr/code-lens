@@ -14,7 +14,7 @@ from codelens.api.deps import admin_user
 router = APIRouter(prefix="/api/jobs")
 
 
-def _job_dict(row: store.sqlite3.Row) -> dict:
+def _job_dict(row: dict) -> dict:
     return {
         "id": row["id"],
         "repoId": row["repo_id"],

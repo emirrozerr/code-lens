@@ -1,24 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import type { User } from '@/types/api';
-import { MOCK_USERS } from '@/lib/api/mocks';
 
 const COOKIE_NAME = process.env.JWT_COOKIE_NAME ?? 'codelens_token';
-const IS_MOCK = process.env.NEXT_PUBLIC_MOCK_MODE === 'true';
-
-// Minimal JWT-shaped token for mock mode: header.payload.sig
-// Real JWTs from the FastAPI backend are used as-is in production mode.
-function createMockToken(user: User): string {
-  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(
-    JSON.stringify({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      exp: Math.floor(Date.now() / 1000) + 86400,
-    }),
-  ).toString('base64url');
-  return `${header}.${payload}.mock_sig`;
-}
 
 function setCookie(response: NextResponse, token: string): void {
   response.cookies.set(COOKIE_NAME, token, {
@@ -45,20 +27,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'Email and password are required' }, { status: 400 });
   }
 
-  // ── Mock mode ────────────────────────────────────────────────────────────
-  if (IS_MOCK) {
-    const user = MOCK_USERS.find((u) => u.email === email);
-    if (!user) {
-      return NextResponse.json({ ok: false, error: 'Invalid credentials' }, { status: 401 });
-    }
-    // Accept any password in mock mode
-    const token = createMockToken(user);
-    const response = NextResponse.json({ ok: true, user });
-    setCookie(response, token);
-    return response;
-  }
-
-  // ── Real backend ─────────────────────────────────────────────────────────
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
   try {
     const res = await fetch(`${baseUrl}/auth/login`, {

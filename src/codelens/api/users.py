@@ -11,7 +11,7 @@ from codelens.api.deps import admin_user, current_user
 router = APIRouter(prefix="/api/users")
 
 
-def _user_dict(row: store.sqlite3.Row) -> dict:
+def _user_dict(row: dict) -> dict:
     return {
         "id": row["id"],
         "email": row["email"],
@@ -23,6 +23,7 @@ def _user_dict(row: store.sqlite3.Row) -> dict:
 
 class AddUserRequest(BaseModel):
     email: str
+    password: str | None = None
 
 
 class SetRoleRequest(BaseModel):
@@ -38,8 +39,8 @@ def list_users(_=Depends(admin_user)):
 def add_user(body: AddUserRequest, _=Depends(admin_user)):
     if store.get_user_by_email(body.email):
         raise HTTPException(status_code=409, detail=f"User {body.email} already exists")
-    user, temp_password = store.create_user(body.email)
-    return {"user": _user_dict(user), "temporaryPassword": temp_password}
+    user, password = store.create_user(body.email, body.password)
+    return {"user": _user_dict(user), "temporaryPassword": password}
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

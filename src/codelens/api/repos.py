@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from pathlib import Path
@@ -17,19 +16,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/repos")
 
 
-def _repo_dict(row: store.sqlite3.Row) -> dict:
+def _repo_dict(row: dict) -> dict:
     return {
         "id": row["id"],
         "name": row["name"],
         "url": row["url"],
-        "paths": json.loads(row["paths"]),
+        "paths": row["paths"],  # already a list from store
         "lastIndexed": row["last_indexed"],
         "nodeCount": row["node_count"],
         "status": row["status"],
     }
 
 
-def _job_dict(row: store.sqlite3.Row) -> dict:
+def _job_dict(row: dict) -> dict:
     return {
         "id": row["id"],
         "repoId": row["repo_id"],
@@ -147,7 +146,7 @@ def reindex_repo(repo_id: str, background: BackgroundTasks, _=Depends(admin_user
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
     # _run_indexing creates its own job; return a preview job dict
-    background.add_task(_run_indexing, repo["id"], repo["name"], repo["url"], json.loads(repo["paths"]))
+    background.add_task(_run_indexing, repo["id"], repo["name"], repo["url"], repo["paths"])
     jobs = store.list_jobs(limit=1)
     if jobs:
         return _job_dict(jobs[0])
@@ -163,19 +162,20 @@ def delete_repo(repo_id: str, _=Depends(admin_user)):
 
 
 def _clear_neo4j_for_repo(repo_id: str) -> None:
-    """Remove all Domain nodes (and their edges) from Neo4j for this repo."""
+    """Remove all code nodes, edges, and domains from Neo4j for this repo."""
     try:
         from codelens.graph.neo4j_client import Neo4jClient
         client = Neo4jClient()
         with client.session() as session:
-            # Delete domains that belong to this repo (or all if repo_id matches stored value)
+            # Delete this repo's domains
             session.run(
                 "MATCH (d:Domain) WHERE coalesce(d.repo_id, 'default') = $rid DETACH DELETE d",
                 rid=repo_id,
             )
-            # Also clear any domains with no repo_id tag (legacy, single-repo scenario)
+            # Delete all code graph nodes (not admin nodes)
             session.run(
-                "MATCH (d:Domain) WHERE d.repo_id IS NULL DETACH DELETE d"
+                "MATCH (n) WHERE NOT n:User AND NOT n:Repository "
+                "AND NOT n:IndexingJob AND NOT n:Domain DETACH DELETE n"
             )
         client.close()
     except Exception as exc:

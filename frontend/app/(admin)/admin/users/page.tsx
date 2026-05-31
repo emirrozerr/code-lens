@@ -115,21 +115,23 @@ interface AddUserDialogProps {
 function AddUserDialog({ open, onOpenChange }: AddUserDialogProps) {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
+  const [createdPassword, setCreatedPassword] = useState<string | null>(null);
 
   function handleClose(v: boolean) {
     if (!v) {
       setEmail('');
-      setTempPassword(null);
+      setPassword('');
+      setCreatedPassword(null);
     }
     onOpenChange(v);
   }
 
   const mutation = useMutation({
-    mutationFn: (e: string) => addUser(e),
+    mutationFn: ({ e, p }: { e: string; p: string }) => addUser(e, p || undefined),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ['users'] });
-      setTempPassword(data.temporaryPassword);
+      setCreatedPassword(data.temporaryPassword);
       toast.success(`User ${data.user.email} added`);
     },
     onError: (err) => {
@@ -139,7 +141,7 @@ function AddUserDialog({ open, onOpenChange }: AddUserDialogProps) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    mutation.mutate(email.trim());
+    mutation.mutate({ e: email.trim(), p: password });
   }
 
   return (
@@ -149,19 +151,12 @@ function AddUserDialog({ open, onOpenChange }: AddUserDialogProps) {
           <DialogTitle>Add user</DialogTitle>
         </DialogHeader>
 
-        {tempPassword ? (
+        {createdPassword ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <p
-              style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: '0.875rem',
-                color: 'var(--text-muted)',
-                margin: 0,
-              }}
-            >
-              User created. Share this temporary password:
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: '0.875rem', color: 'var(--text-muted)', margin: 0 }}>
+              User created. Password:
             </p>
-            <TempPasswordBlock password={tempPassword} />
+            <TempPasswordBlock password={createdPassword} />
             <DialogFooter>
               <Button onClick={() => handleClose(false)}>Done</Button>
             </DialogFooter>
@@ -169,15 +164,7 @@ function AddUserDialog({ open, onOpenChange }: AddUserDialogProps) {
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontFamily: 'var(--font-sans)',
-                  fontSize: '0.8125rem',
-                  color: 'var(--text-muted)',
-                  marginBottom: '0.375rem',
-                }}
-              >
+              <label style={{ display: 'block', fontFamily: 'var(--font-sans)', fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>
                 Email address
               </label>
               <Input
@@ -187,6 +174,18 @@ function AddUserDialog({ open, onOpenChange }: AddUserDialogProps) {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoFocus
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontFamily: 'var(--font-sans)', fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>
+                Password{' '}
+                <span style={{ color: 'var(--text-dim)' }}>(leave blank to auto-generate)</span>
+              </label>
+              <Input
+                type="text"
+                placeholder="Set a password…"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
             <DialogFooter>
