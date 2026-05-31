@@ -130,7 +130,7 @@ class DomainClusterer:
         """
         if not self._groq_client:
             fallback_name = domain_id.replace("_", " ").title()
-            fallback_summary = f"Üyeler:\n{context[:300]}"
+            fallback_summary = f"Members:\n{context[:300]}"
             return fallback_name, fallback_summary
 
         prompt = (
