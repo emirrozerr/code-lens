@@ -25,14 +25,6 @@ def search_nodes(keyword: str) -> str:
     client = Neo4jClient()
     try:
         with client.session() as session:
-            # First, ensure the index exists (this is safe to call multiple times)
-            session.run("""
-                CREATE FULLTEXT INDEX node_search IF NOT EXISTS 
-                FOR (n:Class|Function|Interface|Constructor) 
-                ON EACH [n.name, n.docstring, n.signature, n.filepath]
-            """)
-            
-            # Now query the index
             query = """
             CALL db.index.fulltext.queryNodes("node_search", $keyword) YIELD node, score
             RETURN labels(node)[0] AS type, node.name AS name, node.filepath AS filepath, node.signature AS signature, node.docstring AS docstring, score
@@ -239,9 +231,54 @@ def get_domains() -> str:
 
 
 @mcp.tool()
-def get_domain(domain_name: str) -> str:
-    """Returns the full context and all member nodes of a specific business domain.
-    
+def get_domain(symbol_name: str) -> str:
+    """Returns the business domain that a given symbol (function or class) belongs to.
+
+    Use this to understand the business context of a specific symbol — what domain
+    it lives in, the domain summary, and other members of that domain.
+
+    Args:
+        symbol_name: The exact name of the function or class.
+    """
+    client = Neo4jClient()
+    try:
+        with client.session() as session:
+            query = """
+            MATCH (n)-[:IN_DOMAIN]->(d:Domain)
+            WHERE n.name = $symbol_name
+            OPTIONAL MATCH (member)-[:IN_DOMAIN]->(d)
+            RETURN d.name AS domain_name, d.summary AS summary, collect(DISTINCT member) AS members
+            LIMIT 1
+            """
+            record = session.run(query, symbol_name=symbol_name).single()
+
+            if not record:
+                return f"No domain found for symbol '{symbol_name}'. Run clustering first or check the symbol name."
+
+            output = [
+                f"=== {record['domain_name']} ===",
+                f"Summary: {record['summary']}",
+                "\nMembers:"
+            ]
+            for m in record['members']:
+                if m:
+                    label = list(m.labels)[0] if m.labels else "Unknown"
+                    output.append(f"  - [{label}] {m.get('name', 'unnamed')}")
+
+            return "\n".join(output)
+    except Exception as e:
+        return f"Error executing get_domain: {e}"
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def get_domain_content(domain_name: str) -> str:
+    """Returns all member nodes of a specific business domain by name.
+
+    Use this to explore the full contents of a domain after finding domain names
+    via get_domains().
+
     Args:
         domain_name: The exact name of the domain (e.g., 'Domain 2').
     """
@@ -254,23 +291,22 @@ def get_domain(domain_name: str) -> str:
             RETURN d.summary AS summary, collect(n) AS members
             """
             record = session.run(query, domain_name=domain_name).single()
-            
+
             if not record:
                 return f"Domain '{domain_name}' not found."
-                
+
             output = [
                 f"=== {domain_name} ===",
                 f"Summary: {record['summary']}",
                 "\nMembers:"
             ]
-            
             for m in record['members']:
                 if m:
                     label = list(m.labels)[0] if m.labels else "Unknown"
                     output.append(f"  - [{label}] {m.get('name', 'unnamed')}")
-                    
+
             return "\n".join(output)
     except Exception as e:
-        return f"Error executing get_domain: {e}"
+        return f"Error executing get_domain_content: {e}"
     finally:
         client.close()

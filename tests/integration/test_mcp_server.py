@@ -8,7 +8,7 @@ import pytest
 from neo4j.exceptions import ServiceUnavailable
 
 from codelens.graph.neo4j_client import Neo4jClient
-from codelens.mcp_server.server import search_nodes, get_code_context, get_callers, get_callees, get_domains, get_domain
+from codelens.mcp_server.server import search_nodes, get_code_context, get_callers, get_callees, get_domains, get_domain, get_domain_content
 
 
 @pytest.fixture(scope="module")
@@ -93,23 +93,21 @@ def test_get_callees(check_db):
     assert "getQuantity" in result
 
 
-def test_get_domains_and_domain(check_db):
-    """Test the get_domains and get_domain MCP tools."""
-    # 1. Clean/prepare mock domain
+def test_get_domains_and_domain_content(check_db):
+    """Test the get_domains and get_domain_content MCP tools."""
     client = Neo4jClient()
     try:
         with client.session() as session:
-            # Clean existing domains
             session.run("MATCH (d:Domain) DETACH DELETE d")
-            
-            # Check empty domains message
+
+            # Empty state
             res_empty = get_domains()
             assert "No domains found. Run clustering first." in res_empty
-            
-            # Test getting non-existent domain
-            res_missing = get_domain("NonExistentDomain")
+
+            # Missing domain
+            res_missing = get_domain_content("NonExistentDomain")
             assert "Domain 'NonExistentDomain' not found" in res_missing
-            
+
             # Create a mock Domain and link a node to it
             session.run("""
                 CREATE (d:Domain {name: 'Test Domain', summary: 'A mock domain for testing'})
@@ -117,18 +115,46 @@ def test_get_domains_and_domain(check_db):
                 MATCH (n:Class {name: 'CheckoutService'})
                 CREATE (n)-[:IN_DOMAIN]->(d)
             """)
-            
-            # Test get_domains returns it
+
+            # get_domains lists it
             res_list = get_domains()
             assert "Test Domain" in res_list
             assert "A mock domain for testing" in res_list
-            
-            # Test get_domain returns members
-            res_single = get_domain("Test Domain")
-            assert "=== Test Domain ===" in res_single
-            assert "CheckoutService" in res_single
+
+            # get_domain_content returns members by domain name
+            res_content = get_domain_content("Test Domain")
+            assert "=== Test Domain ===" in res_content
+            assert "CheckoutService" in res_content
     finally:
-        # Clean up domains so we don't pollute subsequent queries
+        with client.session() as session:
+            session.run("MATCH (d:Domain) DETACH DELETE d")
+        client.close()
+
+
+def test_get_domain_by_symbol(check_db):
+    """Test get_domain — finds the domain a symbol belongs to."""
+    client = Neo4jClient()
+    try:
+        with client.session() as session:
+            session.run("MATCH (d:Domain) DETACH DELETE d")
+
+            # No domain assigned yet
+            res_none = get_domain("CheckoutService")
+            assert "No domain found" in res_none
+
+            # Assign CheckoutService to a domain
+            session.run("""
+                CREATE (d:Domain {name: 'Commerce Domain', summary: 'Handles checkout and cart logic'})
+                WITH d
+                MATCH (n:Class {name: 'CheckoutService'})
+                CREATE (n)-[:IN_DOMAIN]->(d)
+            """)
+
+            # Now get_domain by symbol name finds it
+            res = get_domain("CheckoutService")
+            assert "=== Commerce Domain ===" in res
+            assert "Handles checkout and cart logic" in res
+    finally:
         with client.session() as session:
             session.run("MATCH (d:Domain) DETACH DELETE d")
         client.close()
