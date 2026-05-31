@@ -77,7 +77,7 @@ def get_code_context(symbol_name: str) -> str:
             # Find the center node
             query = """
             MATCH (center)
-            WHERE center.name = $symbol_name AND center:Unresolved = false
+            WHERE center.name = $symbol_name AND NOT center:Unresolved
             
             // Get callers
             OPTIONAL MATCH (caller)-[:calls]->(center)
@@ -185,7 +185,7 @@ def get_callees(symbol_name: str) -> str:
         with client.session() as session:
             query = """
             MATCH (source)-[:calls]->(callee)
-            WHERE source.name = $symbol_name AND source:Unresolved = false
+            WHERE source.name = $symbol_name AND NOT source:Unresolved
             RETURN labels(callee)[0] AS type, callee.name AS name
             """
             result = session.run(query, symbol_name=symbol_name)
