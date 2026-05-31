@@ -8,6 +8,15 @@ This guide helps new contributors set up a local CodeLens development environmen
 - Python 3.11+
 - Docker Desktop
 
+## Configure Environment
+
+```bash
+cp .env.example .env
+```
+Windows users can create a .env file manually by copying the contents of .env.example.
+
+Review the Neo4j credentials and related environment variables before starting the services.
+
 ## Clone Repository
 
 ```bash
@@ -42,7 +51,16 @@ pip install -e ".[dev]"
 ## Start Neo4j
 
 ```bash
-docker-compose up -d
+docker compose up -d
+```
+If you use the legacy Docker Compose plugin, docker-compose up -d also works.
+
+The default compose configuration starts both Neo4j and the MCP server.
+
+To start only Neo4j:
+
+```bash
+docker compose up -d neo4j
 ```
 
 Neo4j Browser:

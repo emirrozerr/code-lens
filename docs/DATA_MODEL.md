@@ -5,31 +5,27 @@
 ```mermaid
 flowchart LR
 
-    Package -->|contains| File
-
     File -->|contains| Class
     File -->|contains| Interface
     File -->|contains| Function
-    File -->|contains| Constructor
 
     Class -->|contains| Function
     Class -->|contains| Constructor
 
-    Class -->|extends| Class
-    Class -->|implements| Interface
+    Class -->|extends| Unresolved
+    Class -->|implements| Unresolved
 
     Function -->|calls| Function
     Function -->|has_branch| ConditionalBranch
     Function -->|returns| ReturnStatement
 
-    File -->|imports| File
+    File -->|imports| Unresolved
 ```
 
 ## Node Types
 
 | Node Type | Purpose |
 |------------|------------|
-| Package | Package namespace |
 | File | Source file |
 | Class | Class declaration |
 | Interface | Interface declaration |
@@ -37,6 +33,7 @@ flowchart LR
 | Constructor | Constructor definition |
 | ConditionalBranch | if / else / switch branch |
 | ReturnStatement | Return statement |
+| Unresolved | Placeholder unresolved target |
 
 ## Common Node Properties
 
@@ -66,6 +63,8 @@ All graph nodes are represented by the `CodeNode` model.
 | extends | Class inheritance |
 | has_branch | Function owns a conditional branch |
 | returns | Function returns a value |
+
+**Note:** `extends` and `implements` relationships currently resolve to placeholder `Unresolved` nodes until full symbol resolution is implemented.
 
 ## Graph Storage Models
 
