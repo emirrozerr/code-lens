@@ -224,7 +224,7 @@ export default function AskPage() {
 
       stream.onEvent(handleEvent);
     },
-    [],
+    [activeDomain],
   );
 
   const submitMessage = useCallback(
@@ -257,17 +257,14 @@ export default function AskPage() {
 
       setMessages((prev) => {
         const next = [...prev, userMsg, assistantMsg];
-        // Build history from all messages before the new ones (last MAX_HISTORY)
-        const history = prev.slice(-MAX_HISTORY);
-        // Defer stream start after state update
-        setTimeout(() => {
-          setIsStreaming(true);
-          runStream(trimmed, persona, history, assistantMsgId);
-        }, 0);
         return next;
       });
+
+      const history = messages.slice(-MAX_HISTORY);
+      setIsStreaming(true);
+      runStream(trimmed, persona, history, assistantMsgId);
     },
-    [isStreaming, persona, runStream],
+    [isStreaming, persona, runStream, messages],
   );
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {

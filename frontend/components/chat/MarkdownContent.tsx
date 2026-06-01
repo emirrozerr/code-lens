@@ -13,8 +13,8 @@ import 'prismjs/components/prism-yaml';
 
 // ─── Inline formatting ──────────────────────────────────────────────────────
 
-function renderInline(text: string): React.ReactNode {
-  // Pattern order matters: longer patterns first
+function renderInline(text: string | undefined | null): React.ReactNode {
+  if (!text) return null;
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -62,10 +62,10 @@ function renderInline(text: string): React.ReactNode {
       const m = winner.match;
       parts.push(
         <em key={key++} style={{ color: 'var(--text-muted)' }}>
-          {renderInline(m[3])}
+          {renderInline(m[2])}
         </em>,
       );
-      remaining = remaining.slice(winner.start + m[3].length + 2); // 2 for **
+      remaining = remaining.slice(winner.start + (m[2]?.length ?? 0) + 2);
     } else if (winner.type === 'code') {
       const m = winner.match;
       parts.push(

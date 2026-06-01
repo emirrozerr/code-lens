@@ -149,8 +149,10 @@ def delete_user(user_id: str) -> bool:
     c = _client()
     try:
         with c.session() as s:
-            summary = s.run("MATCH (u:User {id: $id}) DETACH DELETE u", id=user_id).consume()
-            return summary.counters.nodes_deleted > 0
+            exists = s.run("MATCH (u:User {id: $id}) RETURN count(u) AS n", id=user_id).single()["n"] > 0
+            if exists:
+                s.run("MATCH (u:User {id: $id}) DETACH DELETE u", id=user_id)
+            return exists
     finally:
         c.close()
 
@@ -269,8 +271,10 @@ def delete_repo(repo_id: str) -> bool:
     c = _client()
     try:
         with c.session() as s:
-            summary = s.run("MATCH (r:Repository {id: $id}) DETACH DELETE r", id=repo_id).consume()
-            return summary.counters.nodes_deleted > 0
+            exists = s.run("MATCH (r:Repository {id: $id}) RETURN count(r) AS n", id=repo_id).single()["n"] > 0
+            if exists:
+                s.run("MATCH (r:Repository {id: $id}) DETACH DELETE r", id=repo_id)
+            return exists
     finally:
         c.close()
 
