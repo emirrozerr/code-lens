@@ -65,12 +65,16 @@ def _clone_repo(url: str, dest: Path) -> None:
 
 
 def _run_indexing(repo_id: str, repo_name: str, url: str, paths: list[str]) -> None:
+    """Background task: creates a job then runs indexing (used by add_repo)."""
+    job_row = store.create_job(repo_id, repo_name)
+    _run_indexing_with_job(repo_id, repo_name, url, paths, job_row["id"])
+
+
+def _run_indexing_with_job(repo_id: str, repo_name: str, url: str, paths: list[str], job_id: str) -> None:
     """Background task: clone (if URL) then parse repo and ingest into Neo4j."""
     import tempfile
     import shutil
 
-    job_row = store.create_job(repo_id, repo_name)
-    job_id = job_row["id"]
     start = time.monotonic()
     tmp_dir = None
 
@@ -145,13 +149,9 @@ def reindex_repo(repo_id: str, background: BackgroundTasks, _=Depends(admin_user
     repo = store.get_repo(repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-    # _run_indexing creates its own job; return a preview job dict
-    background.add_task(_run_indexing, repo["id"], repo["name"], repo["url"], repo["paths"])
-    jobs = store.list_jobs(limit=1)
-    if jobs:
-        return _job_dict(jobs[0])
-    return {"id": "pending", "repoId": repo_id, "repoName": repo["name"], "status": "running",
-            "startedAt": store._now(), "finishedAt": None, "durationMs": None, "nodeCount": None, "error": None}
+    job = store.create_job(repo["id"], repo["name"])
+    background.add_task(_run_indexing_with_job, repo["id"], repo["name"], repo["url"], repo["paths"], job["id"])
+    return _job_dict(job)
 
 
 @router.delete("/{repo_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -162,21 +162,34 @@ def delete_repo(repo_id: str, _=Depends(admin_user)):
 
 
 def _clear_neo4j_for_repo(repo_id: str) -> None:
-    """Remove all code nodes, edges, and domains from Neo4j for this repo."""
+    """Remove domains and code nodes that belong to this repo from Neo4j."""
     try:
         from codelens.graph.neo4j_client import Neo4jClient
         client = Neo4jClient()
+        repo = store.get_repo(repo_id)
+        repo_url = repo["url"] if repo else None
         with client.session() as session:
             # Delete this repo's domains
             session.run(
                 "MATCH (d:Domain) WHERE coalesce(d.repo_id, 'default') = $rid DETACH DELETE d",
                 rid=repo_id,
             )
-            # Delete all code graph nodes (not admin nodes)
-            session.run(
-                "MATCH (n) WHERE NOT n:User AND NOT n:Repository "
-                "AND NOT n:IndexingJob AND NOT n:Domain DETACH DELETE n"
-            )
+            # Delete code nodes scoped to this repo's URL prefix (filepath match)
+            # Falls back to clearing all code nodes only if URL unavailable
+            if repo_url:
+                repo_name = repo_url.rstrip("/").split("/")[-1]
+                session.run(
+                    "MATCH (n) WHERE NOT n:User AND NOT n:Repository "
+                    "AND NOT n:IndexingJob AND NOT n:Domain "
+                    "AND (n.filepath STARTS WITH $name OR n.filepath IS NULL) "
+                    "DETACH DELETE n",
+                    name=repo_name,
+                )
+            else:
+                session.run(
+                    "MATCH (n) WHERE NOT n:User AND NOT n:Repository "
+                    "AND NOT n:IndexingJob AND NOT n:Domain DETACH DELETE n"
+                )
         client.close()
     except Exception as exc:
         logger.warning("Neo4j cleanup failed (non-fatal): %s", exc)

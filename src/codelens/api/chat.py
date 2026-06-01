@@ -13,7 +13,7 @@ from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from codelens.api.deps import current_user
 from codelens.settings import settings
@@ -27,7 +27,7 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     persona: str = "developer"
-    history: list[dict] = []
+    history: list[dict] = Field(default_factory=list)
     domainId: str | None = None
 
 
@@ -110,9 +110,10 @@ _STOP = {
 
 def _extract_keywords(message: str, max_k: int = 3) -> list[str]:
     """Extract up to max_k meaningful keywords from the message, longest first."""
+    if not message or not message.strip():
+        return []
     words = [w.strip("?.!,;:'\"()[]{}") for w in message.split()]
     candidates = [w for w in words if len(w) > 3 and w.lower() not in _STOP]
-    # Deduplicate case-insensitively, prefer longer/more specific
     seen: set[str] = set()
     result: list[str] = []
     for w in sorted(candidates, key=len, reverse=True):
@@ -121,7 +122,7 @@ def _extract_keywords(message: str, max_k: int = 3) -> list[str]:
             result.append(w)
         if len(result) >= max_k:
             break
-    return result or [message.split()[0]]
+    return result or (words[:1] if words else [])
 
 
 def _parse_symbol(result_line: str) -> str | None:
@@ -189,7 +190,7 @@ async def _stream_groq(
             q.put(_DONE)
 
     threading.Thread(target=_run, daemon=True).start()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     while True:
         item = await loop.run_in_executor(None, q.get)
         if item is _DONE:
