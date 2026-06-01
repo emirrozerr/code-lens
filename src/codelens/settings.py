@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change_me_to_a_random_secret"
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 1440
+    jwt_cookie_secure: bool = False
 
     # App
     log_level: str = "INFO"

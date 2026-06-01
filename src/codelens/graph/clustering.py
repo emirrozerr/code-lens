@@ -54,7 +54,7 @@ class DomainClusterer:
             if len(members) < 2:
                 continue
                 
-            cluster_id = f"Domain_{c_id}"
+            cluster_id = f"{repo_id}_Domain_{c_id}"
 
             # Prepare context for the LLM
             signatures = []
@@ -124,7 +124,7 @@ class DomainClusterer:
         return G, node_info
 
     def _generate_domain_name_and_summary(self, domain_id: str, context: str) -> tuple[str, str]:
-        """Call Groq to generate a short Turkish domain name and a summary.
+        """Call Groq to generate a short English domain name and a summary.
 
         Returns (name, summary). Falls back to (domain_id, plain context) if no key.
         """
@@ -164,7 +164,7 @@ class DomainClusterer:
 
         except Exception as exc:
             logger.error("Groq API error: %s", exc)
-            return domain_id, f"Özet üretilemedi: {exc}"
+            return domain_id, f"Summary generation failed: {exc}"
 
     def _generate_domain_summary(self, domain_id: str, context: str) -> str:
         """Backwards-compat wrapper used by the regenerate API endpoint."""

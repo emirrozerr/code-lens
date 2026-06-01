@@ -52,6 +52,7 @@ def login(body: LoginRequest, response: Response):
         "codelens_token",
         token,
         httponly=True,
+        secure=settings.jwt_cookie_secure,
         samesite="lax",
         max_age=settings.jwt_expiry_minutes * 60,
     )

@@ -12,6 +12,7 @@ export function createChatStream(
   message: string,
   persona: Persona,
   history: ChatMessage[] = [],
+  domainId?: string,
 ): ChatStream {
   let handler: ((event: ChatEvent) => void) | null = null;
   let cancelled = false;
@@ -25,7 +26,7 @@ export function createChatStream(
       res = await fetch(`${base}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify({ message, persona, history }),
+        body: JSON.stringify({ message, persona, history, domainId }),
         credentials: 'include',
         signal: controller.signal,
       });

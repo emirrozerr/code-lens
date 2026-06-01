@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
     message: str
     persona: str = "developer"
     history: list[dict] = []
+    domainId: str | None = None
 
 
 # ─── SSE helpers ──────────────────────────────────────────────────────────────
@@ -52,6 +53,45 @@ def _context(symbol: str) -> str:
         return get_code_context(symbol)
     except Exception as exc:
         return f"Context error: {exc}"
+
+
+def _fetch_domain_context(domain_id: str) -> tuple[str, str]:
+    """Return (domain_name, context_text) for a domain by its Neo4j uid."""
+    try:
+        from codelens.graph.neo4j_client import Neo4jClient
+        client = Neo4jClient()
+        with client.session() as s:
+            row = s.run(
+                "MATCH (d:Domain) WHERE coalesce(d.uid, d.name) = $id "
+                "RETURN d.name AS name, coalesce(d.summary, '') AS summary",
+                id=domain_id,
+            ).single()
+            if not row:
+                return "", ""
+            domain_name = row["name"]
+            summary = row["summary"]
+
+            members = s.run(
+                """
+                MATCH (n)-[:IN_DOMAIN]->(d:Domain)
+                WHERE coalesce(d.uid, d.name) = $id
+                RETURN labels(n)[0] AS type,
+                       coalesce(n.name, '') AS name,
+                       coalesce(n.signature, '') AS signature,
+                       coalesce(n.filepath, '') AS filepath
+                LIMIT 60
+                """,
+                id=domain_id,
+            )
+            lines = [f"Domain: {domain_name}", f"Summary: {summary}", "", "Members:"]
+            for m in members:
+                sig = m["signature"] or m["name"]
+                lines.append(f"  [{m['type']}] {sig}  ({m['filepath']})")
+        client.close()
+        return domain_name, "\n".join(lines)
+    except Exception as exc:
+        logger.error("Domain context fetch error: %s", exc)
+        return "", ""
 
 
 # ─── Keyword extraction ───────────────────────────────────────────────────────
@@ -168,10 +208,22 @@ async def _stream_fallback(context: str) -> AsyncGenerator[str, None]:
 # ─── Main generator ───────────────────────────────────────────────────────────
 
 async def _generate(req: ChatRequest) -> AsyncGenerator[str, None]:
-    keywords = _extract_keywords(req.message)
     aggregated_context: list[str] = []
     already_fetched_symbols: set[str] = set()
 
+    # ── Domain context (primary) ──────────────────────────────────────────────
+    if req.domainId:
+        tool_id = str(uuid.uuid4())[:8]
+        yield _emit({"type": "tool_call_start", "tool": "get_domain", "args": {"domain_id": req.domainId}, "id": tool_id})
+        t0 = time.monotonic()
+        domain_name, domain_ctx = _fetch_domain_context(req.domainId)
+        ms = int((time.monotonic() - t0) * 1000)
+        yield _emit({"type": "tool_call_end", "id": tool_id, "result": domain_ctx or "Domain not found", "durationMs": ms})
+        if domain_ctx:
+            aggregated_context.append(domain_ctx)
+
+    # ── Keyword search (supplemental) ─────────────────────────────────────────
+    keywords = _extract_keywords(req.message)
     for kw in keywords:
         tool_id = str(uuid.uuid4())[:8]
         yield _emit({"type": "tool_call_start", "tool": "search_nodes", "args": {"keyword": kw}, "id": tool_id})

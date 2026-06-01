@@ -28,13 +28,17 @@ def get_graph(repoId: str | None = None, _=Depends(current_user)):
     client = Neo4jClient()
     try:
         with client.session() as session:
-            # Fetch nodes (exclude File and ConditionalBranch for cleaner graph)
-            node_query = """
+            _SKIP = (
+                "NOT n:File AND NOT n:ConditionalBranch AND NOT n:Unresolved "
+                "AND NOT n:ReturnStatement AND NOT n:User AND NOT n:Repository "
+                "AND NOT n:IndexingJob AND NOT n:Domain"
+            )
+
+            node_query = f"""
             MATCH (n)
-            WHERE NOT n:File AND NOT n:ConditionalBranch AND NOT n:Unresolved AND NOT n:ReturnStatement
+            WHERE {_SKIP}
             OPTIONAL MATCH (n)-[:IN_DOMAIN]->(d:Domain)
-            WITH n, d,
-                 size([(n)-[]-() | 1]) AS degree
+            WITH n, d, size([(n)-[]-() | 1]) AS degree
             RETURN
                 coalesce(n.uid, toString(id(n))) AS id,
                 labels(n)[0] AS label,
@@ -44,7 +48,6 @@ def get_graph(repoId: str | None = None, _=Depends(current_user)):
                 coalesce(coalesce(d.uid, d.name), '') AS domainId,
                 degree
             ORDER BY degree DESC
-            LIMIT 500
             """
             node_rows = session.run(node_query)
             nodes = []
@@ -62,17 +65,19 @@ def get_graph(repoId: str | None = None, _=Depends(current_user)):
                     "degree": r["degree"],
                 })
 
-            # Fetch edges between the nodes we returned
-            edge_query = """
+            _SKIP_EDGE = (
+                "NOT a:File AND NOT a:ConditionalBranch AND NOT a:Unresolved "
+                "AND NOT a:ReturnStatement AND NOT a:User AND NOT a:Repository AND NOT a:IndexingJob "
+                "AND NOT b:File AND NOT b:ConditionalBranch AND NOT b:Unresolved "
+                "AND NOT b:ReturnStatement AND NOT b:User AND NOT b:Repository AND NOT b:IndexingJob"
+            )
+            edge_query = f"""
             MATCH (a)-[r]->(b)
-            WHERE NOT a:File AND NOT a:ConditionalBranch AND NOT a:Unresolved AND NOT a:ReturnStatement
-              AND NOT b:File AND NOT b:ConditionalBranch AND NOT b:Unresolved AND NOT b:ReturnStatement
-              AND type(r) <> 'IN_DOMAIN'
+            WHERE {_SKIP_EDGE} AND type(r) <> 'IN_DOMAIN'
             RETURN
                 coalesce(a.uid, toString(id(a))) AS source,
                 coalesce(b.uid, toString(id(b))) AS target,
                 type(r) AS rel_type
-            LIMIT 2000
             """
             edge_rows = session.run(edge_query)
             edges = []

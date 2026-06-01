@@ -34,6 +34,9 @@ services:
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - JWT_EXPIRY_MINUTES=${JWT_EXPIRY_MINUTES:-1440}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL_FAST=${GROQ_MODEL_FAST:-llama-3.1-8b-instant}
+      - GROQ_MODEL_QUALITY=${GROQ_MODEL_QUALITY:-llama-3.3-70b-versatile}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       neo4j:

@@ -58,6 +58,14 @@ def init_db() -> None:
             # Seed default admin if none exists
             count = s.run("MATCH (u:User) RETURN count(u) AS c").single()["c"]
             if count == 0:
+                import os
+                admin_password = os.environ.get("ADMIN_INITIAL_PASSWORD", "admin123")
+                if admin_password == "admin123":
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Using default admin password 'admin123'. "
+                        "Set ADMIN_INITIAL_PASSWORD env var before deploying."
+                    )
                 s.run(
                     """
                     CREATE (:User {
@@ -67,7 +75,7 @@ def init_db() -> None:
                     """,
                     id=str(uuid.uuid4()),
                     email="admin@codelens.dev",
-                    ph=_pwd.hash("admin123"),
+                    ph=_pwd.hash(admin_password),
                     now=_now(),
                 )
     finally:
@@ -141,8 +149,8 @@ def delete_user(user_id: str) -> bool:
     c = _client()
     try:
         with c.session() as s:
-            result = s.run("MATCH (u:User {id: $id}) DELETE u RETURN count(u) AS n", id=user_id).single()
-            return (result["n"] if result else 0) > 0
+            summary = s.run("MATCH (u:User {id: $id}) DETACH DELETE u", id=user_id).consume()
+            return summary.counters.nodes_deleted > 0
     finally:
         c.close()
 
@@ -261,10 +269,8 @@ def delete_repo(repo_id: str) -> bool:
     c = _client()
     try:
         with c.session() as s:
-            result = s.run(
-                "MATCH (r:Repository {id: $id}) DELETE r RETURN count(r) AS n", id=repo_id
-            ).single()
-            return (result["n"] if result else 0) > 0
+            summary = s.run("MATCH (r:Repository {id: $id}) DETACH DELETE r", id=repo_id).consume()
+            return summary.counters.nodes_deleted > 0
     finally:
         c.close()
 

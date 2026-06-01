@@ -271,6 +271,7 @@ function Controls({ repos, selectedRepo, onRepoChange, domainIds, domainNames, h
         <div style={labelStyle}>Search nodes</div>
         <input
           type="text"
+          aria-label="Search nodes"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Filter by name or file…"

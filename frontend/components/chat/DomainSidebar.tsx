@@ -7,12 +7,13 @@ import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
 
 interface DomainSidebarProps {
   onInsertPrompt: (prompt: string) => void;
+  onSelectDomain: (id: string, name: string) => void;
+  activeDomainId: string | null;
 }
 
-export function DomainSidebar({ onInsertPrompt }: DomainSidebarProps) {
+export function DomainSidebar({ onInsertPrompt, onSelectDomain, activeDomainId }: DomainSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState('');
-  const [activeDomainId, setActiveDomainId] = useState<string | null>(null);
 
   const { data: domains = [] } = useQuery({
     queryKey: ['domains', ''],
@@ -26,9 +27,9 @@ export function DomainSidebar({ onInsertPrompt }: DomainSidebarProps) {
   );
 
   function handleDomainClick(id: string, name: string) {
-    setActiveDomainId(id);
+    onSelectDomain(id, name);
     onInsertPrompt(
-      `Tell me about the ${name} domain — what does it do, what are its key functions, and what are its dependencies?`,
+      `What does the ${name} domain do? Explain its key functions and responsibilities.`,
     );
   }
 

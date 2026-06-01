@@ -69,10 +69,13 @@ class Neo4jClient:
         logger.info("Schema setup complete.")
 
     def clear_database(self):
-        """DANGEROUS: Deletes all nodes and relationships from the database."""
-        logger.warning("Clearing entire Neo4j database!")
+        """Delete all code graph nodes, preserving admin nodes (:User, :Repository, :IndexingJob)."""
+        logger.warning("Clearing code graph nodes from Neo4j (admin nodes preserved).")
         with self.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
+            session.run(
+                "MATCH (n) WHERE NOT n:User AND NOT n:Repository AND NOT n:IndexingJob "
+                "DETACH DELETE n"
+            )
 
     # ---------------------------------------------------------------------------
     # Ingestion
