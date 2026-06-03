@@ -39,29 +39,28 @@ def test_domain_clusterer_empty_graph():
 
 def test_domain_clusterer_pipeline(setup_db):
     clusterer = DomainClusterer()
-    
-    # 1. Run clustering with the fallback/mock LLM generator
+
+    # No Groq key set — runs with fallback summaries
     domains = clusterer.run_clustering()
-    
+
     assert domains is not None
     assert len(domains) > 0
-    
+
     for d in domains:
         assert "uid" in d
         assert "name" in d
         assert "summary" in d
         assert "members" in d
-        assert "Mock summary for Domain_" in d["summary"]
+        assert len(d["summary"]) > 0
 
-    # Verify that Domain nodes actually exist in Neo4j
+    # Verify Domain nodes exist in Neo4j
     client = Neo4jClient()
     try:
         with client.session() as session:
             res = session.run("MATCH (d:Domain) RETURN d.uid AS uid, d.name AS name, d.summary AS summary")
             saved_domains = [record.data() for record in res]
             assert len(saved_domains) == len(domains)
-            
-            # Check relationships exist
+
             rel_res = session.run("MATCH (n)-[:IN_DOMAIN]->(d:Domain) RETURN count(n) AS count")
             assert rel_res.single()["count"] > 0
     finally:
@@ -69,24 +68,21 @@ def test_domain_clusterer_pipeline(setup_db):
 
 
 def test_domain_clusterer_llm_api_call():
-    # Test the real model.generate_content API call path via Mock
-    with patch("google.genai.Client") as MockClient:
-        mock_genai_instance = MagicMock()
-        mock_model_instance = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = "This is a summarized domain for orders."
-        
-        mock_model_instance.generate_content.return_value = mock_response
-        mock_genai_instance.models = mock_model_instance
-        MockClient.return_value = mock_genai_instance
-        
-        clusterer = DomainClusterer(api_key="fake-api-key")
-        summary = clusterer._generate_domain_summary("Domain_1", "CheckoutService\nCartItem")
-        
-        assert summary == "This is a summarized domain for orders."
-        mock_model_instance.generate_content.assert_called_once()
-        
-        # Test API exception handling
-        mock_model_instance.generate_content.side_effect = Exception("Quota exceeded")
-        err_summary = clusterer._generate_domain_summary("Domain_1", "CheckoutService\nCartItem")
-        assert "Error generating summary" in err_summary
+    # Test the Groq API call path by injecting a mock client directly
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = "NAME: Order Processing\nSUMMARY: Handles checkout and cart logic."
+
+    mock_groq_client = MagicMock()
+    mock_groq_client.chat.completions.create.return_value = mock_response
+
+    clusterer = DomainClusterer()
+    clusterer._groq_client = mock_groq_client
+
+    summary = clusterer._generate_domain_summary("Domain_1", "CheckoutService\nCartItem")
+    assert "Handles checkout and cart logic" in summary
+    mock_groq_client.chat.completions.create.assert_called_once()
+
+    # Test exception handling
+    mock_groq_client.chat.completions.create.side_effect = Exception("Rate limit")
+    err_summary = clusterer._generate_domain_summary("Domain_1", "CheckoutService\nCartItem")
+    assert len(err_summary) > 0

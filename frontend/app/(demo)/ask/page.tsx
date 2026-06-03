@@ -39,6 +39,7 @@ export default function AskPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [restoredQuestion, setRestoredQuestion] = useState<string | null>(null);
+  const [activeDomain, setActiveDomain] = useState<{ id: string; name: string } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -130,7 +131,7 @@ export default function AskPage() {
       hasRetriedRef.current = false;
       setStreamError(null);
 
-      const stream = createChatStream(text, currentPersona, history);
+      const stream = createChatStream(text, currentPersona, history, activeDomain?.id);
       activeStreamRef.current = stream;
 
       // Mutable accumulator for this stream run — kept in closure, flushed to React state via setMessages
@@ -223,7 +224,7 @@ export default function AskPage() {
 
       stream.onEvent(handleEvent);
     },
-    [],
+    [activeDomain],
   );
 
   const submitMessage = useCallback(
@@ -256,17 +257,14 @@ export default function AskPage() {
 
       setMessages((prev) => {
         const next = [...prev, userMsg, assistantMsg];
-        // Build history from all messages before the new ones (last MAX_HISTORY)
-        const history = prev.slice(-MAX_HISTORY);
-        // Defer stream start after state update
-        setTimeout(() => {
-          setIsStreaming(true);
-          runStream(trimmed, persona, history, assistantMsgId);
-        }, 0);
         return next;
       });
+
+      const history = messages.slice(-MAX_HISTORY);
+      setIsStreaming(true);
+      runStream(trimmed, persona, history, assistantMsgId);
     },
-    [isStreaming, persona, runStream],
+    [isStreaming, persona, runStream, messages],
   );
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -283,6 +281,11 @@ export default function AskPage() {
     [submitMessage],
   );
 
+  const handleSelectDomain = useCallback((id: string, name: string) => {
+    setActiveDomain({ id, name });
+    setMessages([]);
+  }, []);
+
   function handlePersonaChange(p: Persona) {
     setPersona(p);
   }
@@ -297,7 +300,11 @@ export default function AskPage() {
       }}
     >
       {/* Domain browser sidebar (#51) */}
-      <DomainSidebar onInsertPrompt={handleInsertPrompt} />
+      <DomainSidebar
+        onInsertPrompt={handleInsertPrompt}
+        onSelectDomain={handleSelectDomain}
+        activeDomainId={activeDomain?.id ?? null}
+      />
 
       {/* Chat column */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -315,19 +322,45 @@ export default function AskPage() {
             gap: '1rem',
           }}
         >
-          <span
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.8125rem',
-              color: 'var(--accent)',
-              letterSpacing: '0.08em',
-              flexShrink: 0,
-            }}
-          >
-            CodeLens
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', flexShrink: 0 }}>
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.8125rem',
+                color: 'var(--accent)',
+                letterSpacing: '0.08em',
+              }}
+            >
+              CodeLens
+            </span>
+            {activeDomain && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}>/</span>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-sans)',
+                    fontSize: '0.75rem',
+                    color: 'var(--text)',
+                    backgroundColor: 'var(--accent-glow)',
+                    border: '1px solid rgba(139,92,246,0.35)',
+                    borderRadius: '5px',
+                    padding: '0.15rem 0.5rem',
+                  }}
+                >
+                  {activeDomain.name}
+                </span>
+                <button
+                  onClick={() => { setActiveDomain(null); setMessages([]); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: '0.75rem', lineHeight: 1, padding: '0 2px' }}
+                  title="Clear domain context"
+                >
+                  ✕
+                </button>
+              </span>
+            )}
+          </div>
 
-          {/* Persona toggle (#50) */}
+          {/* Persona toggle */}
           <PersonaToggle value={persona} onChange={handlePersonaChange} />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
@@ -578,7 +611,7 @@ export default function AskPage() {
                 resizeTextarea();
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about your codebase… (Enter to send, Shift+Enter for newline)"
+              placeholder={activeDomain ? `Ask about ${activeDomain.name}…` : "Ask about your codebase… (Enter to send, Shift+Enter for newline)"}
               rows={1}
               disabled={isStreaming}
               style={{

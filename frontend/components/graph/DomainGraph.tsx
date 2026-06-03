@@ -242,9 +242,13 @@ interface ControlsProps {
   hiddenDomains: Set<string>;
   onToggleDomain: (id: string) => void;
   onResetView: () => void;
+  search: string;
+  onSearchChange: (v: string) => void;
+  matchCount: number;
+  totalCount: number;
 }
 
-function Controls({ repos, selectedRepo, onRepoChange, domainIds, domainNames, hiddenDomains, onToggleDomain, onResetView }: ControlsProps) {
+function Controls({ repos, selectedRepo, onRepoChange, domainIds, domainNames, hiddenDomains, onToggleDomain, onResetView, search, onSearchChange, matchCount, totalCount }: ControlsProps) {
   return (
     <div
       style={{
@@ -263,6 +267,34 @@ function Controls({ repos, selectedRepo, onRepoChange, domainIds, domainNames, h
         gap: '0.875rem',
       }}
     >
+      <div>
+        <div style={labelStyle}>Search nodes</div>
+        <input
+          type="text"
+          aria-label="Search nodes"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Filter by name or file…"
+          style={{
+            width: '100%',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.75rem',
+            color: 'var(--text-muted)',
+            backgroundColor: 'var(--surface-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: '5px',
+            padding: '0.375rem 0.5rem',
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+        {search && (
+          <div style={{ fontFamily: 'var(--font-sans)', fontSize: '0.6rem', color: 'var(--text-dim)', marginTop: '0.25rem' }}>
+            {matchCount} / {totalCount} nodes
+          </div>
+        )}
+      </div>
+
       <div>
         <div style={labelStyle}>Repository</div>
         <select
@@ -424,6 +456,7 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
   const [selectedNode, setSelectedNode] = useState<RichNode | null>(null);
   const [hiddenDomains, setHiddenDomains] = useState<Set<string>>(new Set());
   const [canvasVisible, setCanvasVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const zoomRef = useRef(1);
 
   useEffect(() => {
@@ -443,7 +476,20 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
     setSelectedNode(null);
     setHiddenDomains(new Set());
     setHoveredId(null);
+    setSearchQuery('');
   }, [data]);
+
+  const searchLower = searchQuery.toLowerCase();
+  const matchingIds = useMemo(() => {
+    if (!searchLower) return null;
+    const s = new Set<string>();
+    for (const n of data.nodes) {
+      if (n.label.toLowerCase().includes(searchLower) || n.file.toLowerCase().includes(searchLower)) {
+        s.add(n.id);
+      }
+    }
+    return s;
+  }, [searchLower, data.nodes]);
 
   // ESC closes the side panel
   useEffect(() => {
@@ -512,6 +558,7 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
 
       let alpha = 1;
       if (hidden) alpha = 0.05;
+      else if (matchingIds && !matchingIds.has(n.id)) alpha = 0.06;
       else if (hoveredId) {
         if (n.id === hoveredId) alpha = 1;
         else if (neighborSet.has(n.id)) alpha = 0.85;
@@ -718,6 +765,10 @@ export function DomainGraph({ data, repos, selectedRepo, onRepoChange }: DomainG
         hiddenDomains={hiddenDomains}
         onToggleDomain={toggleDomain}
         onResetView={handleResetView}
+        search={searchQuery}
+        onSearchChange={setSearchQuery}
+        matchCount={matchingIds?.size ?? data.nodes.length}
+        totalCount={data.nodes.length}
       />
 
       {canvasVisible && (

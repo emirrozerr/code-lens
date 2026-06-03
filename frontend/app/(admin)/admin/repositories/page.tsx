@@ -160,6 +160,10 @@ export default function RepositoriesPage() {
     queryKey: ['repos'],
     queryFn: listRepos,
     refetchOnWindowFocus: true,
+    refetchInterval: (query) => {
+      const data = query.state.data as Repository[] | undefined;
+      return data?.some((r) => r.status === 'indexing') ? 2000 : false;
+    },
   });
 
   const addMutation = useMutation({

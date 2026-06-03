@@ -243,9 +243,7 @@ export default function LoginPage() {
               lineHeight: 1.6,
             }}
           >
-            mock: admin@codelens.dev · user@codelens.dev
-            <br />
-            any password
+            admin@codelens.dev · admin123
           </p>
         )}
       </div>

@@ -52,21 +52,15 @@ class Indexer:
             ext = source_file.suffix.lower()
             lang = SUPPORTED_EXTENSIONS.get(ext)
 
+            parser = None
             if lang == "java":
-                try:
-                    file_result = self._java_parser.parse_file(source_file, repo_path)
-                    combined.nodes.extend(file_result.nodes)
-                    combined.edges.extend(file_result.edges)
-                    combined.errors.extend(file_result.errors)
-                    files_parsed += 1
-                except Exception as exc:
-                    msg = f"Failed to parse {source_file}: {exc}"
-                    logger.warning(msg)
-                    combined.errors.append(msg)
-                    files_skipped += 1
+                parser = self._java_parser
             elif lang == "python":
+                parser = self._python_parser
+
+            if parser:
                 try:
-                    file_result = self._python_parser.parse_file(source_file, repo_path)
+                    file_result = parser.parse_file(source_file, repo_path)
                     combined.nodes.extend(file_result.nodes)
                     combined.edges.extend(file_result.edges)
                     combined.errors.extend(file_result.errors)
@@ -146,20 +140,15 @@ class Indexer:
             ext = source_file.suffix.lower()
             lang = SUPPORTED_EXTENSIONS.get(ext)
 
+            inc_parser = None
             if lang == "java":
-                try:
-                    file_result = self._java_parser.parse_file(source_file, repo_path)
-                    new_result.nodes.extend(file_result.nodes)
-                    new_result.edges.extend(file_result.edges)
-                    new_result.errors.extend(file_result.errors)
-                    files_parsed += 1
-                except Exception as exc:
-                    msg = f"Failed to parse {source_file}: {exc}"
-                    logger.warning(msg)
-                    new_result.errors.append(msg)
+                inc_parser = self._java_parser
             elif lang == "python":
+                inc_parser = self._python_parser
+
+            if inc_parser:
                 try:
-                    file_result = self._python_parser.parse_file(source_file, repo_path)
+                    file_result = inc_parser.parse_file(source_file, repo_path)
                     new_result.nodes.extend(file_result.nodes)
                     new_result.edges.extend(file_result.edges)
                     new_result.errors.extend(file_result.errors)
