@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeLens — MCP Tools &amp; CLI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <span class="brand-name">CodeLens</span>
+    <span class="brand-sub">Documentation</span>
+  </div>
+  <nav>
+    <ul class="nav">
+      <li><a href="index.html">Overview &amp; Architecture</a></li>
+      <li><a href="api.html">REST API Reference</a></li>
+      <li><a href="mcp-cli.html" class="active">MCP Tools &amp; CLI</a></li>
+      <li><a href="flows.html">Core Flows</a></li>
+    </ul>
+  </nav>
+</aside>
+
+<main class="content">
+
+  <h1>MCP Tools &amp; CLI</h1>
+
+  <p class="lead">
+    CodeLens exposes its knowledge graph to AI agents through a Model Context Protocol (MCP)
+    server built on FastMCP, and to operators through a Click-based command-line interface.
+    Both read the same Neo4j graph; the data model that both query is documented at the bottom
+    of this page.
+  </p>
+
+  <!-- ── MCP SERVER ─────────────────────────────────────── -->
+
+  <h2 id="mcp-server">MCP Server</h2>
+
+  <p>
+    Built with FastMCP (<code>from mcp.server.fastmcp import FastMCP</code>;
+    <code>mcp = FastMCP("CodeLens")</code>). Tools are registered with the
+    <code>@mcp.tool()</code> decorator. There is no auth at the MCP layer.
+  </p>
+
+  <p>
+    Transports: stdio (default — for local AI clients like Claude Desktop) or SSE
+    (<code>codelens mcp --transport sse --port 8000</code>, for remote/Docker access).
+  </p>
+
+  <p>
+    Connection model: each tool call instantiates its own <code>Neo4jClient()</code>, opens a
+    session, runs one Cypher query, formats the rows as plain text, and closes the connection in
+    a <code>finally</code> block. Every tool returns a <code>str</code> (success and error alike).
+  </p>
+
+  <div class="note">
+    All 7 tools are read-only — they query the graph but never write to it. Writes happen through
+    the CLI (<code>ingest</code>), the REST API (background indexing), and the watcher.
+  </div>
+
+  <!-- ── TOOL REFERENCE ─────────────────────────────────── -->
+
+  <h2 id="tool-reference">Tool Reference</h2>
+
+  <h3><code>search_nodes(keyword: str) -&gt; str</code></h3>
+  <p>
+    Full-text Lucene search over node name, docstring, signature, and filepath. Returns up to
+    10 hits ranked by relevance.
+  </p>
+  <pre>CALL db.index.fulltext.queryNodes("node_search", $keyword) YIELD node, score
+RETURN labels(node)[0] AS type, node.name AS name, node.filepath AS filepath,
+       node.signature AS signature, node.docstring AS docstring, score
+ORDER BY score DESC LIMIT 10</pre>
+
+  <h3><code>get_code_context(symbol_name: str) -&gt; str</code></h3>
+  <p>
+    Returns a symbol with its direct callers, callees, and internal conditional branches —
+    multi-hop structural context in one call.
+  </p>
+  <pre>MATCH (center)
+WHERE center.name = $symbol_name AND NOT center:Unresolved
+OPTIONAL MATCH (caller)-[:calls]-&gt;(center)
+OPTIONAL MATCH (center)-[:calls]-&gt;(callee)
+OPTIONAL MATCH (center)-[:has_branch]-&gt;(branch)
+RETURN labels(center)[0] AS type, center.filepath AS filepath, center.signature AS signature,
+       collect(DISTINCT caller.name) AS callers,
+       collect(DISTINCT callee.name) AS callees,
+       collect(DISTINCT branch.name) AS branches
+LIMIT 1</pre>
+
+  <h3><code>get_callers(symbol_name: str) -&gt; str</code></h3>
+  <p>
+    All nodes that call the given symbol — for impact analysis.
+  </p>
+  <pre>MATCH (caller)-[:calls]-&gt;(target)
+WHERE target.name = $symbol_name
+RETURN labels(caller)[0] AS type, caller.name AS name, caller.filepath AS filepath</pre>
+
+  <h3><code>get_callees(symbol_name: str) -&gt; str</code></h3>
+  <p>
+    All internal symbols called by the given symbol (Unresolved sources filtered out).
+  </p>
+  <pre>MATCH (source)-[:calls]-&gt;(callee)
+WHERE source.name = $symbol_name AND NOT source:Unresolved
+RETURN labels(callee)[0] AS type, callee.name AS name</pre>
+
+  <h3><code>get_domains() -&gt; str</code></h3>
+  <p>
+    Lists all discovered Domain nodes with member counts and summaries, largest first.
+  </p>
+  <pre>MATCH (d:Domain)
+OPTIONAL MATCH (n)-[:IN_DOMAIN]-&gt;(d)
+RETURN d.name AS name, d.summary AS summary, count(n) AS member_count
+ORDER BY member_count DESC</pre>
+
+  <h3><code>get_domain(symbol_name: str) -&gt; str</code></h3>
+  <p>
+    Given a symbol, returns the domain it belongs to, with the domain summary and all members.
+  </p>
+  <pre>MATCH (n)-[:IN_DOMAIN]-&gt;(d:Domain)
+WHERE n.name = $symbol_name
+OPTIONAL MATCH (member)-[:IN_DOMAIN]-&gt;(d)
+RETURN d.name AS domain_name, d.summary AS summary, collect(DISTINCT member) AS members
+LIMIT 1</pre>
+
+  <h3><code>get_domain_content(domain_name: str) -&gt; str</code></h3>
+  <p>
+    Given a domain name, returns its summary and all member nodes (the inverse of
+    <code>get_domain</code>).
+  </p>
+  <pre>MATCH (d:Domain {name: $domain_name})
+OPTIONAL MATCH (n)-[:IN_DOMAIN]-&gt;(d)
+RETURN d.summary AS summary, collect(n) AS members</pre>
+
+  <!-- ── CLI ────────────────────────────────────────────── -->
+
+  <h2 id="cli">Command-Line Interface</h2>
+
+  <p>
+    The <code>codelens</code> CLI (Click) is the operator entry point. All commands read
+    configuration from <code>.env</code> via the Settings singleton.
+  </p>
+
+  <table class="doc-table">
+    <thead>
+      <tr>
+        <th>Command</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>codelens index &lt;repo&gt; [--stats] [--output FILE]</code></td>
+        <td>
+          Parse a repo in memory only (no Neo4j). Prints a node/edge summary;
+          <code>--stats</code> adds detail; <code>--output</code> writes the ParseResult as JSON.
+        </td>
+      </tr>
+      <tr>
+        <td><code>codelens ingest &lt;repo&gt; [--clear] [--cluster]</code></td>
+        <td>
+          Parse a repo and load it into Neo4j. <code>--clear</code> wipes the graph first
+          (preserving admin nodes); <code>--cluster</code> runs domain detection after loading.
+        </td>
+      </tr>
+      <tr>
+        <td><code>codelens watch &lt;repo&gt;</code></td>
+        <td>
+          Run the watchdog daemon: full index once, then incrementally re-index changed files
+          into Neo4j until interrupted.
+        </td>
+      </tr>
+      <tr>
+        <td><code>codelens mcp [--transport stdio|sse] [--host H] [--port P]</code></td>
+        <td>
+          Start the MCP server. stdio by default; SSE for remote access.
+        </td>
+      </tr>
+      <tr>
+        <td><code>codelens api [--host H] [--port P]</code></td>
+        <td>Start the FastAPI REST server (Uvicorn).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="fig-caption">Index Spring PetClinic into Neo4j with domain clustering</p>
+  <pre># start Neo4j first
+docker compose up -d neo4j
+# parse + load + cluster
+codelens ingest ./spring-petclinic --clear --cluster</pre>
+
+  <p class="fig-caption">Expose the graph to an AI agent over stdio</p>
+  <pre>codelens mcp
+# or for remote access over SSE
+codelens mcp --transport sse --port 8000</pre>
+
+  <!-- ── DATA MODEL ─────────────────────────────────────── -->
+
+  <h2 id="data-model">Data Model</h2>
+
+  <p>
+    Everything above queries one property graph in Neo4j. Nodes are uniquely keyed by a
+    <code>uid</code> (format <code>&lt;filepath&gt;:&lt;qualified_name&gt;</code>). The schema
+    (uniqueness constraints + a <code>node_search</code> fulltext index) is created by
+    <code>Neo4jClient.setup_schema()</code>.
+  </p>
+
+  <pre class="mermaid">
+graph LR
+    File -->|contains| Class
+    File -->|contains| Interface
+    File -->|imports| File
+    Class -->|contains| Function
+    Class -->|contains| Constructor
+    Class -->|extends| Class
+    Class -->|implements| Interface
+    Function -->|calls| Function
+    Function -->|has_branch| ConditionalBranch
+    Function -->|returns| ReturnStatement
+    Function -->|IN_DOMAIN| Domain
+    Class -->|IN_DOMAIN| Domain
+  </pre>
+  <span class="fig-caption">
+    Core node labels and relationship types. Domain nodes are added by the clustering step;
+    everything else is emitted by the parsers.
+  </span>
+
+  <h3 id="node-types">Node Types</h3>
+
+  <table class="doc-table">
+    <thead>
+      <tr>
+        <th>Label</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag">File</span></td>
+        <td>A parsed source file</td>
+      </tr>
+      <tr>
+        <td><span class="tag">Package</span></td>
+        <td>A Java package grouping</td>
+      </tr>
+      <tr>
+        <td><span class="tag">Class</span></td>
+        <td>A class declaration</td>
+      </tr>
+      <tr>
+        <td><span class="tag">Interface</span></td>
+        <td>An interface declaration</td>
+      </tr>
+      <tr>
+        <td><span class="tag">Function</span></td>
+        <td>A method or standalone function</td>
+      </tr>
+      <tr>
+        <td><span class="tag">Constructor</span></td>
+        <td>A constructor (Java) or <code>__init__</code> (Python)</td>
+      </tr>
+      <tr>
+        <td><span class="tag">ConditionalBranch</span></td>
+        <td>An if/switch/for/while/match branch inside a function</td>
+      </tr>
+      <tr>
+        <td><span class="tag">ReturnStatement</span></td>
+        <td>A return statement</td>
+      </tr>
+      <tr>
+        <td><span class="tag">Domain</span></td>
+        <td>A discovered domain (added by clustering)</td>
+      </tr>
+      <tr>
+        <td><span class="tag">Unresolved</span></td>
+        <td>A call target that could not be resolved to a known symbol</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 id="relationship-types">Relationship Types</h3>
+
+  <table class="doc-table">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>From &rarr; To</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag">contains</span></td>
+        <td>File&rarr;Class, Class&rarr;Function, etc.</td>
+      </tr>
+      <tr>
+        <td><span class="tag">calls</span></td>
+        <td>Function&rarr;Function</td>
+      </tr>
+      <tr>
+        <td><span class="tag">imports</span></td>
+        <td>File&rarr;File</td>
+      </tr>
+      <tr>
+        <td><span class="tag">implements</span></td>
+        <td>Class&rarr;Interface</td>
+      </tr>
+      <tr>
+        <td><span class="tag">extends</span></td>
+        <td>Class&rarr;Class (or Python subclass)</td>
+      </tr>
+      <tr>
+        <td><span class="tag">has_branch</span></td>
+        <td>Function&rarr;ConditionalBranch</td>
+      </tr>
+      <tr>
+        <td><span class="tag">returns</span></td>
+        <td>Function&rarr;ReturnStatement</td>
+      </tr>
+      <tr>
+        <td><span class="tag">IN_DOMAIN</span></td>
+        <td>Class/Function &rarr; Domain</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 id="node-properties">Key Node Properties</h3>
+
+  <table class="doc-table">
+    <thead>
+      <tr>
+        <th>Property</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>uid</code></td>
+        <td>Globally unique key, <code>&lt;filepath&gt;:&lt;qualified_name&gt;</code></td>
+      </tr>
+      <tr>
+        <td><code>name</code></td>
+        <td>Simple symbol name (used by MCP search/lookups)</td>
+      </tr>
+      <tr>
+        <td><code>qualified_name</code></td>
+        <td>e.g. <code>ClassName.methodName</code></td>
+      </tr>
+      <tr>
+        <td><code>node_type</code></td>
+        <td>One of the labels above</td>
+      </tr>
+      <tr>
+        <td><code>filepath</code></td>
+        <td>Path relative to repo root</td>
+      </tr>
+      <tr>
+        <td><code>start_line</code> / <code>end_line</code></td>
+        <td>Source span</td>
+      </tr>
+      <tr>
+        <td><code>signature</code></td>
+        <td>Function/constructor signature (when available)</td>
+      </tr>
+      <tr>
+        <td><code>docstring</code></td>
+        <td>Docstring/Javadoc (when available)</td>
+      </tr>
+      <tr>
+        <td><code>file_hash</code></td>
+        <td>SHA-256 of the source at index time</td>
+      </tr>
+    </tbody>
+  </table>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', flowchart: { curve: 'basis' } });
+</script>
+
+</body>
+</html>

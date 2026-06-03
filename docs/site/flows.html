@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeLens — Core Flows</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand"><span class="brand-name">CodeLens</span><span class="brand-sub">Documentation</span></div>
+  <nav><ul class="nav">
+    <li><a href="index.html">Overview &amp; Architecture</a></li>
+    <li><a href="api.html">REST API Reference</a></li>
+    <li><a href="mcp-cli.html">MCP Tools &amp; CLI</a></li>
+    <li><a href="flows.html" class="active">Core Flows</a></li>
+  </ul></nav>
+</aside>
+
+<main class="content">
+
+  <h1>Core Flows</h1>
+
+  <p class="lead">
+    Five sequence diagrams covering the system's most important paths: indexing a repository,
+    answering a chat question, an AI agent querying the graph over MCP, logging in, and
+    incremental re-indexing. Each diagram is followed by a short step-by-step explanation.
+  </p>
+
+  <!-- ── 1 · Repository Ingestion ──────────────────────────── -->
+
+  <h2 id="ingestion">1 · Repository Ingestion (<code>codelens ingest</code>)</h2>
+
+  <p>
+    Parsing a repository in memory and loading it into Neo4j, optionally followed by domain
+    clustering. This is also what the REST API runs as a background task when a repo is added.
+  </p>
+
+  <pre class="mermaid">
+sequenceDiagram
+    actor User
+    participant CLI
+    participant Indexer
+    participant Parser as Java/Python Parser
+    participant N4 as Neo4jClient
+    participant Neo4j
+    participant DC as DomainClusterer
+    participant Groq
+    User->>CLI: codelens ingest repo --clear --cluster
+    CLI->>Indexer: index_repository(repo)
+    Indexer->>Indexer: _discover_files() skip build/hidden
+    loop each .java / .py file
+        Indexer->>Parser: parse_file()
+        Parser-->>Indexer: ParseResult (nodes, edges)
+    end
+    Indexer->>Indexer: _resolve_calls() unresolved to uid
+    Indexer-->>CLI: combined ParseResult
+    CLI->>N4: clear_database() [--clear]
+    CLI->>N4: setup_schema() constraints + fulltext
+    CLI->>N4: ingest_parse_result(result)
+    N4->>Neo4j: MERGE nodes (batched UNWIND)
+    N4->>Neo4j: MERGE edges (mark :Unresolved)
+    N4->>Neo4j: DELETE orphan :Unresolved
+    CLI->>DC: run_clustering() [--cluster]
+    DC->>Neo4j: fetch Class/Function/Interface + edges
+    DC->>DC: Louvain best_partition
+    loop each cluster (size >= 2)
+        DC->>Groq: name + summarise members
+        Groq-->>DC: NAME / SUMMARY
+    end
+    DC->>Neo4j: MERGE :Domain + IN_DOMAIN edges
+  </pre>
+  <span class="fig-caption">Ingestion: parse &rarr; resolve calls &rarr; load graph &rarr; cluster into domains.</span>
+
+  <ol>
+    <li>Discover all <code>.java</code> and <code>.py</code> files in the repo, skipping build directories and hidden paths.</li>
+    <li>Parse each file through the appropriate Tree-sitter parser, producing <code>CodeNode</code> and <code>CodeEdge</code> objects.</li>
+    <li>Resolve call targets by name, mapping unresolved calls to stable UIDs.</li>
+    <li>Optionally clear the existing database (<code>--clear</code>) before loading.</li>
+    <li>Create schema constraints and a fulltext index (<code>setup_schema()</code>).</li>
+    <li>Merge all nodes into Neo4j using batched <code>UNWIND</code>, then merge all edges, marking unresolvable targets as <code>:Unresolved</code>.</li>
+    <li>Drop any orphan <code>:Unresolved</code> nodes that have no matching target.</li>
+    <li>Optionally run Louvain community detection (<code>--cluster</code>) and call Groq once per community (size &ge; 2) to produce a name and summary, then write <code>:Domain</code> nodes and <code>IN_DOMAIN</code> edges back into Neo4j.</li>
+  </ol>
+
+  <!-- ── 2 · Chat ───────────────────────────────────────────── -->
+
+  <h2 id="chat">2 · Chat over the Graph (<code>POST /chat</code>)</h2>
+
+  <p>
+    The chat endpoint gathers structural context from Neo4j via the MCP tools, then streams an
+    LLM answer over SSE. Every tool call is surfaced to the UI as it happens.
+  </p>
+
+  <pre class="mermaid">
+sequenceDiagram
+    actor User
+    participant FE as Frontend /ask
+    participant API as FastAPI /chat
+    participant MCP as MCP tools
+    participant Neo4j
+    participant Groq
+    User->>FE: ask question (persona, domainId?)
+    FE->>API: POST /chat (SSE, cookie JWT)
+    opt domainId provided
+        API-->>FE: tool_call_start get_domain
+        API->>Neo4j: fetch domain + members
+        API-->>FE: tool_call_end
+    end
+    API->>API: _extract_keywords(message) up to 3
+    loop each keyword
+        API-->>FE: tool_call_start search_nodes
+        API->>MCP: search_nodes(keyword)
+        MCP->>Neo4j: fulltext query
+        Neo4j-->>MCP: hits
+        API-->>FE: tool_call_end
+        API-->>FE: tool_call_start get_code_context
+        API->>MCP: get_code_context(symbol)
+        MCP->>Neo4j: multi-hop query
+        Neo4j-->>MCP: context
+        API-->>FE: tool_call_end
+    end
+    API->>Groq: chat.completions stream (context + history)
+    loop each token
+        Groq-->>API: delta
+        API-->>FE: token event
+    end
+    API-->>FE: done + [DONE]
+  </pre>
+  <span class="fig-caption">Chat: domain + keyword search build context, then a streamed Groq completion.</span>
+
+  <ol>
+    <li>If a <code>domainId</code> was supplied, fetch the domain node and its members from Neo4j and emit <code>tool_call_start</code> / <code>tool_call_end</code> SSE events to the UI.</li>
+    <li>Extract up to 3 keywords from the user's message with <code>_extract_keywords()</code>.</li>
+    <li>For each keyword, run <code>search_nodes</code> (fulltext) then <code>get_code_context</code> (multi-hop graph query) to assemble structural context, emitting tool-call events for each.</li>
+    <li>Stream a <code>chat.completions</code> call to Groq (<code>llama-3.1-8b-instant</code>) with the accumulated context and conversation history.</li>
+    <li>Forward each token delta to the frontend as a <code>token</code> SSE event, then emit <code>done</code> and <code>[DONE]</code>.</li>
+  </ol>
+
+  <div class="note">
+    If <code>GROQ_API_KEY</code> is unset, or Groq errors, the endpoint falls back to
+    character-streaming the raw graph context it collected.
+  </div>
+
+  <!-- ── 3 · MCP Agent Query ────────────────────────────────── -->
+
+  <h2 id="mcp">3 · AI Agent Query over MCP</h2>
+
+  <p>
+    How an external AI agent (Claude Code, Cursor) pulls structural context through the MCP server.
+  </p>
+
+  <pre class="mermaid">
+sequenceDiagram
+    actor Agent as AI Agent
+    participant MCP as FastMCP Server
+    participant Tool as "@mcp.tool"
+    participant N4 as Neo4jClient
+    participant Neo4j
+    Agent->>MCP: call tool e.g. get_callers(name)
+    MCP->>Tool: dispatch(symbol_name)
+    Tool->>N4: Neo4jClient() connect
+    Tool->>Neo4j: run Cypher query
+    Neo4j-->>Tool: rows
+    Tool->>Tool: format rows as text
+    Tool->>N4: close()
+    Tool-->>MCP: str result
+    MCP-->>Agent: tool result
+  </pre>
+  <span class="fig-caption">MCP query: each tool opens a fresh Neo4j connection, runs one Cypher query, and returns plain text.</span>
+
+  <p>
+    All 7 MCP tools (<code>search_nodes</code>, <code>get_code_context</code>,
+    <code>get_callers</code>, <code>get_callees</code>, <code>get_domains</code>,
+    <code>get_domain</code>, <code>get_domain_content</code>) follow exactly this same shape:
+    connect, query, format, close, return a plain string. No state is held between calls.
+  </p>
+
+  <!-- ── 4 · Login ──────────────────────────────────────────── -->
+
+  <h2 id="login">4 · Login &amp; Route Protection</h2>
+
+  <p>
+    Authentication spans three layers: the Next.js login page, a Next.js route handler that owns
+    the cookie, the FastAPI backend that verifies credentials, and the Edge middleware that gates
+    protected routes.
+  </p>
+
+  <pre class="mermaid">
+sequenceDiagram
+    actor User
+    participant Login as /login page
+    participant NextAPI as Next /api/auth/login
+    participant API as FastAPI /auth/login
+    participant Neo4j
+    participant MW as middleware.ts
+    User->>Login: email + password
+    Login->>NextAPI: POST /api/auth/login
+    NextAPI->>API: POST /auth/login (proxy)
+    API->>Neo4j: get_user_by_email
+    API->>API: verify pbkdf2_sha256
+    API->>Neo4j: update last_login
+    API->>API: encode JWT (sub, email, role, exp)
+    API-->>NextAPI: access_token + user
+    NextAPI->>NextAPI: set codelens_token cookie (httpOnly)
+    NextAPI-->>Login: ok + user
+    Login->>Login: redirect by role (/admin or /ask)
+    User->>MW: GET /admin/* or /ask
+    MW->>MW: decode cookie, check exp + role
+    MW-->>User: allow or redirect to /login
+  </pre>
+  <span class="fig-caption">Login: the Next.js route handler owns the httpOnly cookie; middleware does a cheap claims check; FastAPI does the real verification.</span>
+
+  <div class="note">
+    <code>middleware.ts</code> only decodes the JWT to check presence, structure, expiry, and the
+    role claim &mdash; it does NOT verify the signature. Signature verification happens in FastAPI
+    on every API call.
+  </div>
+
+  <!-- ── 5 · Incremental Re-indexing ───────────────────────── -->
+
+  <h2 id="watcher">5 · Incremental Re-indexing (<code>codelens watch</code>)</h2>
+
+  <p>
+    The watcher keeps an in-memory snapshot and syncs only the changed files into Neo4j as you edit.
+  </p>
+
+  <pre class="mermaid">
+sequenceDiagram
+    participant FS as File System
+    participant H as EventHandler
+    participant Q as Queue
+    participant D as WatcherDaemon
+    participant Indexer
+    participant N4 as Neo4jClient
+    participant Neo4j
+    Note over D: start(): full index_repository to in-memory snapshot
+    FS->>H: file created / modified / deleted
+    H->>Q: (changed|deleted, path)
+    D->>Q: get() + debounce 0.5s + drain
+    D->>D: changed minus deleted
+    D->>Indexer: index_incremental(snapshot, changed, deleted)
+    Indexer-->>D: updated ParseResult
+    loop each deleted file
+        D->>N4: delete_file_subgraph(path)
+        N4->>Neo4j: DETACH DELETE
+    end
+    loop each changed file
+        D->>N4: delete_file_subgraph(path)
+        D->>N4: ingest_parse_result(mini)
+        N4->>Neo4j: MERGE nodes / edges
+    end
+  </pre>
+  <span class="fig-caption">Incremental sync: debounce file events, re-parse only what changed, and replace just those files' subgraphs.</span>
+
+</main>
+
+<script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral', sequence: { useMaxWidth: true } });</script>
+
+</body>
+</html>
