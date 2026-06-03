@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeLens — Overview &amp; Architecture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <span class="brand-name">CodeLens</span>
+    <span class="brand-sub">Documentation</span>
+  </div>
+  <nav>
+    <ul class="nav">
+      <li><a href="index.html" class="active">Overview &amp; Architecture</a></li>
+      <li><a href="api.html">REST API Reference</a></li>
+      <li><a href="mcp-cli.html">MCP Tools &amp; CLI</a></li>
+      <li><a href="flows.html">Core Flows</a></li>
+    </ul>
+  </nav>
+</aside>
+
+<main class="content">
+
+  <h1>CodeLens</h1>
+
+  <p class="lead">
+    CodeLens is a code-intelligence layer for AI agents. It parses Java and Python codebases into
+    a Neo4j knowledge graph and exposes that graph — through an MCP server, a REST API, and a web
+    UI — so AI agents and humans can query structural context (callers, callees, domains) instead
+    of relying on text search alone.
+  </p>
+
+  <!-- ── The Three Tiers ─────────────────────────────────── -->
+
+  <h2 id="three-tiers">The Three Tiers</h2>
+
+  <p>CodeLens is structured around three cooperating tiers, each with a distinct role.</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h3>Python Backend <code>src/codelens/</code></h3>
+      <p>CLI, Tree-sitter AST parsers, Neo4j client, MCP server, clustering, and a FastAPI auth + admin REST layer.</p>
+    </div>
+    <div class="card">
+      <h3>Next.js Frontend <code>frontend/</code></h3>
+      <p>Admin panel and demo UI: streaming chat at <code>/ask</code>, a force-directed graph at <code>/graph</code>, and admin CRUD under <code>/admin/*</code>.</p>
+    </div>
+    <div class="card">
+      <h3>Neo4j</h3>
+      <p>The graph database that stores the code knowledge graph (nodes, relationships, and discovered domains). Runs via Docker.</p>
+    </div>
+  </div>
+
+  <!-- ── System Architecture ────────────────────────────── -->
+
+  <h2 id="architecture">System Architecture</h2>
+
+  <p>How the tiers connect at runtime.</p>
+
+  <pre class="mermaid">
+flowchart TB
+    subgraph Clients
+        AI["AI Agents<br/>Claude Code, Cursor"]
+        Browser["Browser<br/>User / Admin"]
+    end
+    subgraph Frontend["Frontend — Next.js 15 · :3000"]
+        MW["middleware.ts<br/>JWT cookie gate"]
+        Pages["Pages<br/>/login · /ask · /graph · /admin/*"]
+        NextAPI["Next API routes<br/>/api/auth/* cookie proxy"]
+    end
+    subgraph Backend["Python Backend — src/codelens"]
+        REST["FastAPI REST API · :8000"]
+        MCP["MCP Server (FastMCP)<br/>7 tools · stdio / SSE"]
+        Indexer["Indexer<br/>Tree-sitter Java/Python"]
+        Cluster["Clustering<br/>Louvain + Groq naming"]
+        Watcher["Watcher<br/>watchdog daemon"]
+        CLI["CLI (Click)<br/>index·ingest·watch·mcp·api"]
+    end
+    Neo4j[("Neo4j 5<br/>Knowledge Graph<br/>bolt :7687")]
+    Groq["Groq API<br/>LLM: chat + domain naming"]
+    Browser --> MW --> Pages
+    Pages -->|login| NextAPI -->|proxy| REST
+    Pages -->|fetch + cookie| REST
+    Pages -->|SSE /chat| REST
+    AI -->|MCP protocol| MCP
+    REST --> Neo4j
+    REST -->|chat stream| Groq
+    REST -->|background index| Indexer
+    REST --> Cluster
+    REST -->|reuses tools| MCP
+    MCP --> Neo4j
+    Indexer --> Neo4j
+    Cluster --> Neo4j
+    Cluster --> Groq
+    Watcher --> Indexer
+    Watcher --> Neo4j
+    CLI --> Indexer
+    CLI --> Cluster
+    CLI --> MCP
+  </pre>
+  <span class="fig-caption">
+    Runtime topology. The REST API and MCP server both read/write the same Neo4j graph; the MCP
+    server is what AI agents connect to.
+  </span>
+
+  <!-- ── Components ─────────────────────────────────────── -->
+
+  <h2 id="components">Components</h2>
+
+  <div class="card-grid">
+    <div class="card">
+      <h3>Frontend — Next.js</h3>
+      <p>App Router with React 19, Tailwind v4, shadcn/ui, TanStack Query. Route groups:
+      <code>(auth)</code> /login, <code>(demo)</code> /ask + /graph,
+      <code>(admin)</code> /admin/*. <code>middleware.ts</code> gates routes by decoding
+      the <code>codelens_token</code> JWT cookie.</p>
+    </div>
+    <div class="card">
+      <h3>REST API — FastAPI</h3>
+      <p>22 endpoints across auth, users, repos, jobs, domains, stats, graph, and chat.
+      JWT auth via httpOnly cookie; admin-only routes guarded by a role dependency.
+      Streams chat and job status over SSE.</p>
+    </div>
+    <div class="card">
+      <h3>MCP Server — FastMCP</h3>
+      <p>Exposes 7 read-only tools (<code>search_nodes</code>, <code>get_code_context</code>,
+      <code>get_callers</code>, <code>get_callees</code>, <code>get_domains</code>,
+      <code>get_domain</code>, <code>get_domain_content</code>) over stdio or SSE.
+      Each tool runs a Cypher query and returns plain text.</p>
+    </div>
+    <div class="card">
+      <h3>Indexer — Tree-sitter</h3>
+      <p>Walks a repo, dispatches <code>.java</code>/<code>.py</code> files to language parsers,
+      emits <code>CodeNode</code>/<code>CodeEdge</code> objects, and resolves call targets by name.
+      Supports full and incremental indexing.</p>
+    </div>
+    <div class="card">
+      <h3>Clustering — Louvain + Groq</h3>
+      <p>Loads the graph into NetworkX, runs Louvain community detection (python-louvain),
+      and asks Groq to name and summarise each community as a Domain.</p>
+    </div>
+    <div class="card">
+      <h3>Watcher — watchdog</h3>
+      <p>A daemon that watches the repo for file changes, debounces them, re-parses only
+      affected files, and syncs the delta into Neo4j.</p>
+    </div>
+    <div class="card">
+      <h3>CLI — Click</h3>
+      <p>Commands: <code>index</code> (in-memory), <code>ingest</code> (parse + load Neo4j),
+      <code>watch</code> (incremental daemon), <code>mcp</code> (start MCP server),
+      <code>api</code> (start FastAPI).</p>
+    </div>
+    <div class="card">
+      <h3>Neo4j 5</h3>
+      <p>Community edition with APOC + GDS plugins. Stores File/Class/Function/etc. nodes,
+      calls/contains/imports/etc. relationships, and Domain nodes with
+      <code>IN_DOMAIN</code> edges.</p>
+    </div>
+  </div>
+
+  <!-- ── Tech Stack ─────────────────────────────────────── -->
+
+  <h2 id="tech-stack">Tech Stack</h2>
+
+  <table class="doc-table">
+    <thead>
+      <tr>
+        <th>Layer</th>
+        <th>Technologies</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Frontend</td>
+        <td>
+          <span class="tag">Next.js 15.5</span>
+          <span class="tag">React 19</span>
+          <span class="tag">TypeScript</span>
+          <span class="tag">Tailwind v4</span>
+          <span class="tag">shadcn/ui</span>
+          <span class="tag">TanStack Query</span>
+          <span class="tag">react-force-graph-2d</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Backend API</td>
+        <td>
+          <span class="tag">Python</span>
+          <span class="tag">FastAPI</span>
+          <span class="tag">Uvicorn</span>
+          <span class="tag">Pydantic Settings</span>
+          <span class="tag">PyJWT (HS256)</span>
+          <span class="tag">passlib (pbkdf2_sha256)</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Parsing</td>
+        <td>
+          <span class="tag">Tree-sitter</span>
+          <span class="tag">tree-sitter-java</span>
+          <span class="tag">tree-sitter-python</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Graph &amp; Clustering</td>
+        <td>
+          <span class="tag">Neo4j 5 (APOC, GDS)</span>
+          <span class="tag">neo4j Python driver</span>
+          <span class="tag">NetworkX</span>
+          <span class="tag">python-louvain</span>
+        </td>
+      </tr>
+      <tr>
+        <td>LLM</td>
+        <td>
+          <span class="tag">Groq</span>
+          <span class="tag">llama-3.1-8b-instant</span>
+          <span class="tag">llama-3.3-70b-versatile</span>
+        </td>
+      </tr>
+      <tr>
+        <td>MCP</td>
+        <td>
+          <span class="tag">FastMCP</span>
+          <span class="tag">mcp package</span>
+          <span class="tag">stdio + SSE transports</span>
+        </td>
+      </tr>
+      <tr>
+        <td>Tooling</td>
+        <td>
+          <span class="tag">Click (CLI)</span>
+          <span class="tag">watchdog</span>
+          <span class="tag">Docker Compose</span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ── Deployment Topology ────────────────────────────── -->
+
+  <h2 id="deployment">Deployment Topology</h2>
+
+  <p>
+    The project ships a <code>docker-compose.yml</code> that brings up the full stack. Each service
+    maps to a distinct process; only Neo4j and the API start by default.
+  </p>
+
+  <table class="doc-table">
+    <thead>
+      <tr>
+        <th>Service</th>
+        <th>Image / Command</th>
+        <th>Ports</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>neo4j</strong></td>
+        <td><code>neo4j:5-community</code></td>
+        <td>7474 (Browser), 7687 (Bolt)</td>
+        <td>APOC + GDS plugins</td>
+      </tr>
+      <tr>
+        <td><strong>api</strong></td>
+        <td><code>build: . → codelens api --host 0.0.0.0 --port 8000</code></td>
+        <td>8000</td>
+        <td>FastAPI REST; uses <code>bolt://neo4j:7687</code> internally</td>
+      </tr>
+      <tr>
+        <td><strong>mcp-server</strong></td>
+        <td><code>codelens mcp --transport sse --port 8001</code></td>
+        <td>8001</td>
+        <td>Commented out in <code>docker-compose.yml</code>; run on demand</td>
+      </tr>
+      <tr>
+        <td><strong>frontend</strong></td>
+        <td>Next.js dev/build</td>
+        <td>3000</td>
+        <td>Run separately with <code>pnpm dev</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    By default <code>docker compose up -d</code> starts only Neo4j and the FastAPI API. The MCP
+    server is started on demand (stdio for local AI clients, or SSE for remote).
+  </div>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', flowchart: { curve: 'basis' } });
+</script>
+
+</body>
+</html>

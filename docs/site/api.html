@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeLens — REST API Reference</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <span class="brand-name">CodeLens</span>
+    <span class="brand-sub">Documentation</span>
+  </div>
+  <nav>
+    <ul class="nav">
+      <li><a href="index.html">Overview &amp; Architecture</a></li>
+      <li><a href="api.html" class="active">REST API Reference</a></li>
+      <li><a href="mcp-cli.html">MCP Tools &amp; CLI</a></li>
+      <li><a href="flows.html">Core Flows</a></li>
+    </ul>
+  </nav>
+</aside>
+
+<main class="content">
+
+  <h1>REST API Reference</h1>
+
+  <p class="lead">
+    The CodeLens REST API is a FastAPI application (app title "CodeLens API", v0.1.0) served on
+    port 8000. Authentication is a JWT carried in an httpOnly cookie named
+    <code>codelens_token</code>. Admin-only routes additionally require
+    <code>role: admin</code> in the token. All examples assume the cookie is sent automatically
+    by the browser (<code>credentials: 'include'</code>).
+  </p>
+
+  <!-- ── Authentication Model ──────────────────────────── -->
+
+  <h2 id="auth-model">Authentication Model</h2>
+
+  <p>
+    Login issues a JWT signed with HS256 (<code>settings.jwt_secret_key</code>), expiring after
+    <code>jwt_expiry_minutes</code> (default 1440 = 24 h). Token claims: <code>sub</code>
+    (user id / UUID), <code>email</code>, <code>role</code> (<code>"admin"</code> |
+    <code>"user"</code>), <code>exp</code>.
+  </p>
+
+  <p>
+    The token is stored in the httpOnly cookie <code>codelens_token</code>
+    (<code>sameSite=lax</code>; <code>secure</code> controlled by
+    <code>jwt_cookie_secure</code>). The Next.js frontend sets this cookie via its own
+    <code>/api/auth/login</code> route handler, which proxies to the backend's
+    <code>/auth/login</code>.
+  </p>
+
+  <p>
+    Two server-side dependencies enforce auth: <code>current_user</code> — decodes the cookie
+    JWT, loads the user from Neo4j, returns 401 if missing / invalid / expired / unknown — and
+    <code>admin_user</code>, which chains on <code>current_user</code> and returns 403 unless
+    <code>role == "admin"</code>.
+  </p>
+
+  <p>
+    Passwords are hashed with passlib <code>pbkdf2_sha256</code>. Users, repositories, and
+    indexing jobs are all persisted as nodes in Neo4j
+    (<code>:User</code>, <code>:Repository</code>, <code>:IndexingJob</code>).
+  </p>
+
+  <div class="note">
+    On startup the API seeds a default admin user <code>admin@codelens.dev</code> if no users
+    exist (password from <code>ADMIN_INITIAL_PASSWORD</code>, default <code>admin123</code>).
+    Change this before any shared deployment.
+  </div>
+
+  <!-- ── Endpoint Summary ───────────────────────────────── -->
+
+  <h2 id="endpoint-summary">Endpoint Summary</h2>
+
+  <table class="doc-table">
+    <thead>
+      <tr>
+        <th>Method</th>
+        <th>Path</th>
+        <th>Auth</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/health</code></td>
+        <td><span class="auth auth-none">Public</span></td>
+        <td>Liveness probe → <code>{"status":"ok"}</code></td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/auth/login</code></td>
+        <td><span class="auth auth-none">Public</span></td>
+        <td>Email + password → sets <code>codelens_token</code> cookie, returns token + user</td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/auth/logout</code></td>
+        <td><span class="auth auth-none">Public</span></td>
+        <td>Clears the <code>codelens_token</code> cookie</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/auth/me</code></td>
+        <td><span class="auth auth-jwt">Any JWT</span></td>
+        <td>Validate a Bearer token, return the user (called by the Next.js proxy)</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/users/me</code></td>
+        <td><span class="auth auth-jwt">Any JWT</span></td>
+        <td>Current user from the cookie JWT</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/users</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>List all users</td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/api/users</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Create a user; returns a one-time temporary password</td>
+      </tr>
+      <tr>
+        <td><span class="badge delete">DELETE</span></td>
+        <td><code>/api/users/{user_id}</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Delete a user (cannot delete yourself)</td>
+      </tr>
+      <tr>
+        <td><span class="badge patch">PATCH</span></td>
+        <td><code>/api/users/{user_id}/role</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Set role to <code>"admin"</code> or <code>"user"</code></td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/api/users/{user_id}/reset-password</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Generate + return a new temporary password</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/repos</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>List repositories</td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/api/repos</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Register a repo; kicks off background indexing</td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/api/repos/{repo_id}/reindex</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Re-run indexing for a repo</td>
+      </tr>
+      <tr>
+        <td><span class="badge delete">DELETE</span></td>
+        <td><code>/api/repos/{repo_id}</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Delete a repo and its graph data</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/jobs</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>List indexing jobs (query: <code>limit</code>, default 50)</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/jobs/{job_id}/stream</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>SSE stream of a job's status until it finishes</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/domains</code></td>
+        <td><span class="auth auth-jwt">Any JWT</span></td>
+        <td>List discovered domains (query: <code>repoId</code> optional)</td>
+      </tr>
+      <tr>
+        <td><span class="badge patch">PATCH</span></td>
+        <td><code>/api/domains/{domain_id}</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Edit a domain summary + <code>humanVerified</code> flag</td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/api/domains/{domain_id}/regenerate</code></td>
+        <td><span class="auth auth-admin">Admin only</span></td>
+        <td>Regenerate a domain summary via the LLM</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/stats</code></td>
+        <td><span class="auth auth-jwt">Any JWT</span></td>
+        <td>Dashboard aggregate counts + Neo4j health</td>
+      </tr>
+      <tr>
+        <td><span class="badge get">GET</span></td>
+        <td><code>/api/graph</code></td>
+        <td><span class="auth auth-jwt">Any JWT</span></td>
+        <td>Force-directed graph data (nodes + edges)</td>
+      </tr>
+      <tr>
+        <td><span class="badge post">POST</span></td>
+        <td><code>/chat</code></td>
+        <td><span class="auth auth-jwt">Any JWT</span></td>
+        <td>Streaming (SSE) chat over the knowledge graph</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ── Endpoints by Router ───────────────────────────── -->
+
+  <h2 id="endpoints-by-router">Endpoints by Router</h2>
+
+  <!-- Auth -->
+
+  <h2 id="router-auth">Auth <code>auth.py</code></h2>
+
+  <h3 id="post-auth-login">
+    <span class="badge post">POST</span> /auth/login
+    <span class="auth auth-none">Public</span>
+  </h3>
+  <p>Authenticate with email and password; sets the <code>codelens_token</code> httpOnly cookie and returns the token alongside the user object.</p>
+
+  <p><strong>Request body</strong></p>
+  <pre><code>{
+  "email": "admin@codelens.dev",
+  "password": "admin123"
+}</code></pre>
+
+  <p><strong>200 OK</strong></p>
+  <pre><code>{
+  "access_token": "&lt;jwt&gt;",
+  "token_type": "bearer",
+  "user": {
+    "id": "uuid",
+    "email": "admin@codelens.dev",
+    "role": "admin",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "lastLogin": "2024-06-01T12:00:00Z"
+  }
+}</code></pre>
+
+  <p><strong>401 Unauthorized</strong></p>
+  <pre><code>{ "detail": "Invalid credentials" }</code></pre>
+
+  <h3 id="post-auth-logout">
+    <span class="badge post">POST</span> /auth/logout
+    <span class="auth auth-none">Public</span>
+  </h3>
+  <p>Clears the <code>codelens_token</code> cookie. No request body required.</p>
+  <p><strong>200 OK</strong></p>
+  <pre><code>{ "ok": true }</code></pre>
+
+  <h3 id="get-auth-me">
+    <span class="badge get">GET</span> /auth/me
+    <span class="auth auth-jwt">Any JWT</span>
+  </h3>
+  <p>
+    Validates a Bearer token passed in the <code>Authorization</code> header
+    (<strong>not</strong> the cookie). Used by the Next.js proxy to validate tokens
+    server-side. Returns the user object on success; 401 if the token is missing or invalid.
+  </p>
+
+  <h3 id="get-api-users-me">
+    <span class="badge get">GET</span> /api/users/me
+    <span class="auth auth-jwt">Any JWT</span>
+  </h3>
+  <p>Returns the currently authenticated user decoded from the cookie JWT.</p>
+  <p><strong>200 OK</strong></p>
+  <pre><code>{
+  "id": "uuid",
+  "email": "user@example.com",
+  "role": "user",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "lastLogin": "2024-06-01T10:30:00Z"
+}</code></pre>
+
+  <!-- Users -->
+
+  <h2 id="router-users">Users <code>/api/users</code> — <span class="auth auth-admin">Admin only</span></h2>
+
+  <h3 id="get-api-users">
+    <span class="badge get">GET</span> /api/users
+  </h3>
+  <p>Returns an array of all user objects.</p>
+
+  <h3 id="post-api-users">
+    <span class="badge post">POST</span> /api/users
+  </h3>
+  <p>Create a new user. If <code>password</code> is omitted a random 12-character password is generated and returned as <code>temporaryPassword</code>.</p>
+
+  <p><strong>Request body</strong></p>
+  <pre><code>{
+  "email": "newuser@example.com",
+  "password": null
+}</code></pre>
+
+  <p><strong>201 Created</strong></p>
+  <pre><code>{
+  "user": {
+    "id": "uuid",
+    "email": "newuser@example.com",
+    "role": "user",
+    "createdAt": "2024-06-01T00:00:00Z",
+    "lastLogin": null
+  },
+  "temporaryPassword": "aB3xQ7mPwZ1y"
+}</code></pre>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Status</th><th>Condition</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>201</td><td>User created successfully</td></tr>
+      <tr><td>409</td><td>Email already exists</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="delete-api-users">
+    <span class="badge delete">DELETE</span> /api/users/{user_id}
+  </h3>
+  <p>Delete a user by ID. Returns 204 with no body on success.</p>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Status</th><th>Condition</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>204</td><td>Deleted successfully</td></tr>
+      <tr><td>400</td><td>Attempting to delete yourself</td></tr>
+      <tr><td>404</td><td>User not found</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="patch-api-users-role">
+    <span class="badge patch">PATCH</span> /api/users/{user_id}/role
+  </h3>
+  <p>Set a user's role.</p>
+
+  <p><strong>Request body</strong></p>
+  <pre><code>{ "role": "admin" }</code></pre>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Status</th><th>Condition</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>200</td><td>Updated user object</td></tr>
+      <tr><td>422</td><td>Invalid role value</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="post-api-users-reset-password">
+    <span class="badge post">POST</span> /api/users/{user_id}/reset-password
+  </h3>
+  <p>Generate a new temporary password for the user.</p>
+
+  <p><strong>200 OK</strong></p>
+  <pre><code>{ "temporaryPassword": "xK9mL2nQpR4t" }</code></pre>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Status</th><th>Condition</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>200</td><td>New temporary password returned</td></tr>
+      <tr><td>404</td><td>User not found</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Repositories -->
+
+  <h2 id="router-repos">Repositories <code>/api/repos</code> — <span class="auth auth-admin">Admin only</span></h2>
+
+  <p><strong>Repo object shape</strong></p>
+  <pre><code>{
+  "id": "uuid",
+  "name": "spring-petclinic",
+  "url": "https://github.com/spring-projects/spring-petclinic",
+  "paths": [],
+  "lastIndexed": "2024-06-01T12:00:00Z",
+  "nodeCount": 842,
+  "status": "indexed"
+}</code></pre>
+  <p>
+    <code>status</code> is one of: <code>pending</code> | <code>indexing</code> |
+    <code>indexed</code> | <code>failed</code>.
+  </p>
+
+  <h3 id="get-api-repos">
+    <span class="badge get">GET</span> /api/repos
+  </h3>
+  <p>Returns an array of all registered repository objects.</p>
+
+  <h3 id="post-api-repos">
+    <span class="badge post">POST</span> /api/repos
+  </h3>
+  <p>
+    Register a repository and kick off background indexing. The endpoint creates a
+    <code>:Repository</code> node (status <code>pending</code>), returns immediately, and enqueues
+    a FastAPI <code>BackgroundTask</code> that:
+  </p>
+  <ol>
+    <li>Creates an <code>:IndexingJob</code> node.</li>
+    <li>Clones the repo (<code>git clone --depth=1</code> for URLs, or uses a local path).</li>
+    <li>Runs the Tree-sitter <code>Indexer</code> over the source files.</li>
+    <li>Loads results into Neo4j (<code>setup_schema</code> + <code>ingest_parse_result</code>).</li>
+    <li>Runs Louvain clustering + Groq domain naming (non-fatal if it fails).</li>
+    <li>Marks the job finished and sets the repo to <code>indexed</code>.</li>
+  </ol>
+
+  <p><strong>Request body</strong></p>
+  <pre><code>{
+  "url": "https://github.com/spring-projects/spring-petclinic",
+  "paths": null
+}</code></pre>
+
+  <p><strong>201 Created</strong> — returns the repo object; <code>status</code> will be <code>"pending"</code> at return time.</p>
+
+  <h3 id="post-api-repos-reindex">
+    <span class="badge post">POST</span> /api/repos/{repo_id}/reindex
+  </h3>
+  <p>Create a new indexing job and re-run the full indexing pipeline in the background.</p>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Status</th><th>Body</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>200</td><td>Job object (status <code>pending</code>)</td></tr>
+      <tr><td>404</td><td>Repo not found</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="delete-api-repos">
+    <span class="badge delete">DELETE</span> /api/repos/{repo_id}
+  </h3>
+  <p>
+    Delete a repo and all its associated data: <code>:Domain</code> nodes and all code graph
+    nodes ingested from that repo. Idempotent. Returns 204 with no body.
+  </p>
+
+  <!-- Indexing Jobs -->
+
+  <h2 id="router-jobs">Indexing Jobs <code>/api/jobs</code> — <span class="auth auth-admin">Admin only</span></h2>
+
+  <p><strong>Job object shape</strong></p>
+  <pre><code>{
+  "id": "uuid",
+  "repoId": "uuid",
+  "repoName": "spring-petclinic",
+  "status": "succeeded",
+  "startedAt": "2024-06-01T12:00:00Z",
+  "finishedAt": "2024-06-01T12:01:30Z",
+  "durationMs": 90000,
+  "nodeCount": 842,
+  "error": null
+}</code></pre>
+  <p>
+    <code>status</code> is one of: <code>running</code> | <code>pending</code> |
+    <code>succeeded</code> | <code>failed</code>.
+  </p>
+
+  <h3 id="get-api-jobs">
+    <span class="badge get">GET</span> /api/jobs
+  </h3>
+  <p>Returns an array of all indexing jobs ordered by <code>startedAt</code> descending.</p>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Query param</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>limit</code></td><td>50</td><td>Maximum number of jobs to return</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="get-api-jobs-stream">
+    <span class="badge get">GET</span> /api/jobs/{job_id}/stream
+  </h3>
+  <p>
+    Opens a <code>text/event-stream</code> (SSE) connection. Emits the full job object as JSON
+    approximately every second until the job's status is no longer <code>running</code> or
+    <code>pending</code>, then closes the stream. Emits <code>{ "error": "Job not found" }</code>
+    if the job ID is unknown.
+  </p>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Response header</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Content-Type</code></td><td><code>text/event-stream</code></td></tr>
+      <tr><td><code>Cache-Control</code></td><td><code>no-cache</code></td></tr>
+      <tr><td><code>X-Accel-Buffering</code></td><td><code>no</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- Domains -->
+
+  <h2 id="router-domains">Domains <code>/api/domains</code></h2>
+
+  <p><strong>Domain object shape</strong></p>
+  <pre><code>{
+  "id": "uuid",
+  "name": "Pet Management",
+  "repoId": "uuid",
+  "repoName": "spring-petclinic",
+  "memberCount": 34,
+  "summary": "Handles pet registration, owner lookup, and visit history.",
+  "humanVerified": false,
+  "lastUpdated": "2024-06-01T12:05:00Z"
+}</code></pre>
+
+  <h3 id="get-api-domains">
+    <span class="badge get">GET</span> /api/domains
+    <span class="auth auth-jwt">Any JWT</span>
+  </h3>
+  <p>Returns an array of domains ordered by <code>memberCount</code> descending. Returns an empty array on Neo4j error.</p>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Query param</th><th>Required</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>repoId</code></td><td>No</td><td>Filter domains to a specific repository</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="patch-api-domains">
+    <span class="badge patch">PATCH</span> /api/domains/{domain_id}
+    <span class="auth auth-admin">Admin only</span>
+  </h3>
+  <p>Edit a domain's summary text and/or mark it as human-verified.</p>
+
+  <p><strong>Request body</strong></p>
+  <pre><code>{
+  "summary": "Handles all aspects of pet registration and owner management.",
+  "humanVerified": true
+}</code></pre>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Status</th><th>Condition</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>200</td><td>Updated domain object</td></tr>
+      <tr><td>404</td><td>Domain not found</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="post-api-domains-regenerate">
+    <span class="badge post">POST</span> /api/domains/{domain_id}/regenerate
+    <span class="auth auth-admin">Admin only</span>
+  </h3>
+  <p>
+    Re-summarises the domain by sending up to 50 member node signatures to the LLM and replacing
+    the existing summary. Resets <code>humanVerified</code> to <code>false</code>.
+  </p>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Status</th><th>Condition</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>200</td><td>Refreshed domain object</td></tr>
+      <tr><td>404</td><td>Domain not found</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Stats & Graph -->
+
+  <h2 id="router-stats-graph">Stats &amp; Graph</h2>
+
+  <h3 id="get-api-stats">
+    <span class="badge get">GET</span> /api/stats
+    <span class="auth auth-jwt">Any JWT</span>
+  </h3>
+  <p>Returns aggregated dashboard counts and Neo4j health. Note: <code>mcpUptime</code> is currently a hardcoded <code>0</code>.</p>
+
+  <p><strong>200 OK</strong></p>
+  <pre><code>{
+  "reposCount": 3,
+  "totalNodes": 2541,
+  "domainsCount": 18,
+  "activeUsers": 4,
+  "neo4jStatus": "ok",
+  "mcpUptime": 0,
+  "lastSuccessfulIndex": "2024-06-01T12:01:30Z"
+}</code></pre>
+
+  <p><code>neo4jStatus</code> is <code>"ok"</code> or <code>"down"</code>. <code>lastSuccessfulIndex</code> is an ISO timestamp or <code>null</code>.</p>
+
+  <h3 id="get-api-graph">
+    <span class="badge get">GET</span> /api/graph
+    <span class="auth auth-jwt">Any JWT</span>
+  </h3>
+  <p>
+    Returns the full code graph optimised for force-directed visualisation. Excludes
+    <code>File</code>, <code>ConditionalBranch</code>, <code>ReturnStatement</code>,
+    <code>Unresolved</code>, and admin nodes. Edge types are normalised:
+    <code>extends</code> → <code>inherits</code>; <code>contains</code> / <code>has_branch</code> /
+    <code>returns</code> / <code>IN_DOMAIN</code> → <code>uses</code>. Returns empty arrays on
+    Neo4j error.
+  </p>
+
+  <p><strong>200 OK</strong></p>
+  <pre><code>{
+  "nodes": [
+    {
+      "id": "uuid",
+      "label": "PetController",
+      "file": "src/main/java/.../PetController.java",
+      "signature": "class PetController",
+      "domain": "Pet Management",
+      "domainId": "uuid",
+      "degree": 12
+    }
+  ],
+  "edges": [
+    {
+      "source": "uuid-a",
+      "target": "uuid-b",
+      "type": "calls"
+    }
+  ]
+}</code></pre>
+
+  <p>Edge <code>type</code> values: <code>calls</code> | <code>imports</code> | <code>inherits</code> | <code>uses</code>.</p>
+
+  <!-- Chat -->
+
+  <h2 id="router-chat">Chat</h2>
+
+  <h3 id="post-chat">
+    <span class="badge post">POST</span> /chat
+    <span class="auth auth-jwt">Any JWT</span>
+  </h3>
+  <p>
+    Streams a chat response over the knowledge graph as Server-Sent Events (SSE). The endpoint
+    optionally fetches domain context, extracts up to three keywords from the message, calls the
+    MCP tools <code>search_nodes</code> and <code>get_code_context</code> to gather graph context,
+    and then streams a Groq completion.
+  </p>
+
+  <p><strong>Request body</strong></p>
+  <pre><code>{
+  "message": "Which classes call PetController?",
+  "persona": "developer",
+  "history": [
+    { "role": "user", "content": "Tell me about the domain structure." },
+    { "role": "assistant", "content": "The codebase has 4 domains: ..." }
+  ],
+  "domainId": null
+}</code></pre>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>message</code></td><td><code>str</code></td><td>User's question</td></tr>
+      <tr><td><code>persona</code></td><td><code>"developer" | "product" | "legal"</code></td><td>Adjusts the system prompt tone</td></tr>
+      <tr><td><code>history</code></td><td>array of <code>{role, content}</code></td><td>Prior conversation turns</td></tr>
+      <tr><td><code>domainId</code></td><td><code>str | null</code></td><td>Pin context to a specific domain</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Response</strong> — <code>Content-Type: text/event-stream</code></p>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>Event type</th><th>Payload fields</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>tool_call_start</code></td><td><code>tool</code>, <code>args</code>, <code>id</code></td><td>An MCP tool is about to be called</td></tr>
+      <tr><td><code>tool_call_end</code></td><td><code>id</code>, <code>result</code>, <code>durationMs</code></td><td>MCP tool returned</td></tr>
+      <tr><td><code>token</code></td><td><code>content</code></td><td>A streamed text chunk from the LLM</td></tr>
+      <tr><td><code>done</code></td><td>—</td><td>Stream complete; followed by sentinel <code>data: [DONE]</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    See the <a href="flows.html">Core Flows</a> page for sequence diagrams covering the full chat
+    pipeline and the repository ingestion flow.
+  </div>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', flowchart: { curve: 'basis' } });
+</script>
+
+</body>
+</html>
