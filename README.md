@@ -2,220 +2,297 @@
 
 **Code Intelligence Infrastructure for AI Agents**
 
-> Status: In development -- Phase 1 (CLI + Java parser) implemented and tested.
-
-CodeLens indexes your codebase into a structured knowledge graph and exposes it through a **Model Context Protocol (MCP) server** -- so your existing AI agents (Claude Code, Cursor, Copilot) can query your codebase with graph-level structural accuracy.
-
-**The product is the MCP server + the knowledge graph.** Not a chatbot. Not another AI tool. An intelligence layer that makes your existing AI tools dramatically smarter about your codebase.
+CodeLens indexes Java and Python codebases into a Neo4j knowledge graph and exposes that graph through an MCP (Model Context Protocol) server and a REST API. AI agents (Claude Desktop, Claude Code, Cursor) can query structural context — callers, callees, business domains — instead of relying on plain text search.
 
 ---
 
-## How It Works
+## Architecture
 
-1. **Indexes your codebase as a structured graph** -- functions, classes, call chains, conditional branches, all linked with precise relationships in Neo4j.
-2. **Identifies business domains automatically** -- a community detection algorithm clusters related code into domains. A single LLM call per domain generates a human-readable name, summary, and observed business rules.
-3. **Serves structural context through MCP** -- any MCP-compatible agent can call `get_code_context("apply_discount")` and get back a multi-hop subgraph of callers, callees, conditionals, and the domain it belongs to.
-4. **Hybrid discovery** -- the AI agent primarily uses its own tools (grep, etc.) or our lightweight native Lucene search (`search_nodes`) to find entry points, then calls CodeLens for structural context (see [ADR-002](docs/decisions/ADR-002-code-discovery-strategy.md)).
-5. **Query-time interpretation** -- business rule synthesis is performed by the client AI at query time, not pre-computed at index time (see [ADR-001](docs/decisions/ADR-001-rule-interpretation-strategy.md)).
+```
+┌─────────────────────────────────────────────────────────┐
+│                      User Layer                         │
+│  Claude Desktop / Claude Code / Cursor  (MCP clients)   │
+│  Next.js Frontend  (demo chat + admin panel)            │
+└────────────────────┬────────────────────────────────────┘
+                     │
+        ┌────────────┴─────────────┐
+        ▼                          ▼
+┌───────────────┐        ┌──────────────────┐
+│  MCP Server   │        │   FastAPI REST   │
+│  (stdio/SSE)  │        │     port 8000    │
+│   7 tools     │        │   JWT auth       │
+└───────┬───────┘        └────────┬─────────┘
+        └──────────┬──────────────┘
+                   ▼
+        ┌──────────────────┐
+        │      Neo4j       │
+        │  Graph Database  │
+        │    port 7687     │
+        └──────────────────┘
+                   ▲
+        ┌──────────────────┐
+        │  AST Pipeline    │
+        │  Java + Python   │
+        │  (Tree-sitter)   │
+        └──────────────────┘
+```
+
+**Three tiers:**
+1. **Presentation** — Next.js 15 frontend: streaming chat (`/ask`), force-directed graph (`/graph`), admin panel (`/admin/*`)
+2. **Application** — FastAPI REST API + MCP server + Groq LLM integration + community detection
+3. **Data** — Neo4j graph database (code graph + admin data under separate labels)
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| AST Parsing | Tree-sitter (`tree-sitter-java`, `tree-sitter-python`) |
+| Graph Database | Neo4j (Docker) |
+| Community Detection | python-louvain (Louvain algorithm) + NetworkX |
+| LLM — domain naming | Groq `llama-3.3-70b-versatile` |
+| LLM — chat | Groq `llama-3.1-8b-instant` (SSE streaming) |
+| MCP Framework | FastMCP |
+| REST API | FastAPI + Uvicorn |
+| Authentication | JWT (python-jose) + bcrypt (passlib) |
+| Frontend | Next.js 15, React 19, TypeScript, Tailwind v4, shadcn/ui |
+| Data Fetching | TanStack Query |
+| Graph Visualization | react-force-graph-2d |
 
 ---
 
 ## Prerequisites
 
 - Python 3.11+
-- Git
+- Node.js 20+ and pnpm
+- Docker (for Neo4j)
+- Groq API key — free at [console.groq.com](https://console.groq.com)
 
 ---
 
 ## Quick Start
 
+### 1. Clone and install
+
 ```bash
-# Clone the repository
 git clone https://github.com/emirrozerr/code-lens.git
 cd code-lens
 
-# Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate   # On Windows: .venv\Scripts\activate
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
 
-# Install CodeLens in development mode
 pip install -e ".[dev]"
-
-# Verify the installation
-codelens --version
 ```
 
-### Index a Java Repository
+### 2. Configure environment
 
 ```bash
-# Index any Java project (e.g. Spring PetClinic)
-git clone --depth 1 https://github.com/spring-projects/spring-petclinic.git /tmp/spring-petclinic
-codelens index /tmp/spring-petclinic --stats
-
-# Export the parse result as JSON for inspection
-codelens index /tmp/spring-petclinic --output result.json
+cp .env.example .env
+# Edit .env and set:
+#   GROQ_API_KEY=<your_key>
+#   JWT_SECRET_KEY=<random_string>
 ```
 
-### Run Tests
+### 3. Start Neo4j
 
 ```bash
-# Run the full test suite (unit + integration + smoke)
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run only unit tests
-pytest tests/unit/
-
-# Run only integration tests (includes CLI smoke tests)
-pytest tests/integration/
+docker compose up -d neo4j
 ```
 
-### Testing Against Spring PetClinic
-
-Some integration tests validate against the [Spring PetClinic](https://github.com/spring-projects/spring-petclinic) repo. To enable these:
+### 4. Start the REST API
 
 ```bash
-git clone --depth 1 https://github.com/spring-projects/spring-petclinic.git tests/fixtures/spring-petclinic
-pytest tests/integration/test_cli_smoke.py -v
+codelens api
+# Listening on http://localhost:8000
 ```
 
-These tests are automatically skipped if the PetClinic repo is not present.
+### 5. Ingest a repository
+
+```bash
+# Spring PetClinic fixture is already included
+codelens ingest tests/fixtures/spring-petclinic --clear --cluster
+```
+
+`--cluster` runs Louvain community detection and calls Groq to name each domain.
+
+### 6. Start the frontend
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+# Open http://localhost:3000
+```
+
+---
+
+## MCP Server Integration
+
+### Claude Desktop
+
+Add to `%APPDATA%\Claude\claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "codelens": {
+      "command": "C:\\path\\to\\code-lens\\.venv\\Scripts\\codelens.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude mcp add codelens -- codelens mcp
+```
+
+### SSE mode (Docker / remote)
+
+```bash
+codelens mcp --transport sse --port 8000
+# Endpoint: http://localhost:8000/sse
+```
+
+---
+
+## MCP Tools
+
+| Tool | Parameter | Description |
+|---|---|---|
+| `search_nodes` | `keyword` | Lucene fulltext search on names, signatures, file paths |
+| `get_code_context` | `symbol_name` | Returns callers, callees, and branches for a symbol |
+| `get_callers` | `symbol_name` | Everything that calls this symbol (impact analysis) |
+| `get_callees` | `symbol_name` | Everything this symbol calls |
+| `get_domains` | — | Lists all business domains with summaries |
+| `get_domain` | `symbol_name` | Domain a symbol belongs to, plus all members |
+| `get_domain_content` | `domain_name` | All members of a specific domain |
+
+---
+
+## REST API
+
+| Endpoint | Method | Description | Auth |
+|---|---|---|---|
+| `/auth/login` | POST | Login, returns JWT cookie | Public |
+| `/auth/logout` | POST | Clear JWT cookie | — |
+| `/auth/me` | GET | Current user info | User |
+| `/api/repos` | GET / POST | List / add repositories | Admin |
+| `/api/repos/{id}/reindex` | POST | Trigger re-indexing | Admin |
+| `/api/repos/{id}` | DELETE | Delete repository | Admin |
+| `/api/jobs` | GET | Indexing job history | Admin |
+| `/api/domains` | GET | List domains | Admin |
+| `/api/graph` | GET | Graph nodes/edges for visualization | User |
+| `/api/stats` | GET | Aggregate statistics | Admin |
+| `/api/users` | GET / POST | User management | Admin |
+| `/chat` | POST | SSE streaming chat | User |
+
+Full OpenAPI docs available at `http://localhost:8000/docs` when the API is running.
 
 ---
 
 ## CLI Reference
 
 ```
-codelens index <REPO_PATH> [OPTIONS]
-
-Options:
-  -v, --verbose    Enable debug logging
-  -s, --stats      Print detailed statistics (classes, methods, branches)
-  -o, --output     Write parse result as JSON to a file
-  --help           Show help message
+codelens index   <REPO_PATH> [--stats] [--output FILE]   Parse only (no Neo4j)
+codelens ingest  <REPO_PATH> [--clear] [--cluster]       Parse + store in Neo4j
+codelens mcp     [--transport stdio|sse] [--port PORT]   Start MCP server
+codelens api     [--host HOST] [--port PORT]             Start REST API
+codelens watch   <REPO_PATH>                             Incremental re-indexer
 ```
 
-**Example output:**
+---
 
+## Tests
+
+```bash
+pytest                        # all tests
+pytest tests/unit/            # unit tests (no Neo4j required)
+pytest tests/integration/     # integration tests (Neo4j required)
+pytest tests/unit/ -v --cov   # with coverage report
 ```
-  CodeLens Indexer
-  ────────────────────────────────────────
-  Repository:  /tmp/spring-petclinic
 
-  Nodes (379 total)
-  ──────────────────────────────
-    Class                       44
-    ConditionalBranch           40
-    Constructor                  6
-    File                        47
-    Function                   164
-    Interface                    3
-    ReturnStatement             75
-
-  Edges (1339 total)
-  ──────────────────────────────
-    calls                      572
-    contains                   217
-    extends                      8
-    has_branch                  40
-    imports                    427
-    returns                     75
-
-  ✓ Done
-```
+Unit tests do not require Neo4j or any external service. Integration tests require a running Neo4j instance (`docker compose up -d neo4j`).
 
 ---
 
 ## Project Structure
 
 ```
-src/codelens/
-  cli.py            CLI entry point (Click-based)
-  settings.py       Central configuration loaded from .env
-  indexer/
-    models.py       Pydantic data models (CodeNode, CodeEdge, ParseResult)
-    java_parser.py  Tree-sitter Java AST parser
-    indexer.py      Repository walker and file orchestrator
-  graph/            Neo4j connection, schema management (coming soon)
-  mcp_server/       MCP tool handlers (coming soon)
-  api/              FastAPI app (coming soon)
-tests/
-  unit/             Unit tests for parser
-  integration/      Integration tests for indexer + CLI smoke tests
-  fixtures/         Sample Java repos for testing
-docs/               Living spec, ADRs, requirements
+code-lens/
+├── src/codelens/
+│   ├── settings.py            Single config source (Pydantic, reads .env)
+│   ├── cli.py                 Click CLI
+│   ├── indexer/
+│   │   ├── models.py          CodeNode, CodeEdge, ParseResult
+│   │   ├── java_parser.py     Tree-sitter Java parser
+│   │   ├── python_parser.py   Tree-sitter Python parser
+│   │   └── indexer.py         Repo walker
+│   ├── graph/
+│   │   ├── neo4j_client.py    Driver wrapper, schema, ingestion
+│   │   └── clustering.py      Louvain + Groq → Domain nodes
+│   ├── mcp_server/
+│   │   └── server.py          FastMCP — 7 tool definitions
+│   ├── api/
+│   │   ├── __init__.py        FastAPI app, CORS, router registration
+│   │   ├── auth.py            Login / logout / me
+│   │   ├── chat.py            SSE streaming chat + Groq
+│   │   ├── repos.py           Repository CRUD + background indexing
+│   │   ├── domains.py         Domain endpoints
+│   │   ├── graph.py           Visualization data
+│   │   ├── users.py           User management
+│   │   ├── jobs.py            Job history
+│   │   ├── stats.py           Statistics
+│   │   ├── store.py           Neo4j-backed admin data layer
+│   │   └── deps.py            JWT dependency injection
+│   └── watcher.py             watchdog incremental re-indexer
+├── frontend/
+│   ├── app/
+│   │   ├── (auth)/login/      Login page
+│   │   ├── (demo)/ask/        Streaming chat UI
+│   │   ├── (demo)/graph/      Force-directed graph
+│   │   └── (admin)/admin/     Dashboard, repos, domains, users
+│   ├── components/
+│   │   ├── chat/              MessageBubble, DomainSidebar, PersonaToggle
+│   │   ├── graph/             DomainGraph (react-force-graph-2d)
+│   │   └── admin/             Tables and cards
+│   └── lib/
+│       ├── api/               client.ts, sse.ts, endpoints.ts
+│       └── auth.tsx           useAuth hook
+├── tests/
+│   ├── unit/                  Parser and model tests
+│   ├── integration/           Neo4j and CLI smoke tests
+│   └── fixtures/spring-petclinic/   Demo Java repo
+├── docker-compose.yml
+├── pyproject.toml
+├── .env.example
+└── PROJECT_REPORT.md          Full technical report
 ```
 
 ---
 
-## MCP Tools (Coming in Phase 2)
+## Environment Variables
 
-Once the MCP server is running and configured in your AI client, these tools become available:
-
-| Tool | Description |
-|---|---|
-| `search_nodes(keyword)` | Native Lucene full-text search on node names, docstrings, and file paths |
-| `get_code_context(symbol)` | Multi-hop subgraph around a function or class |
-| `get_callers(symbol)` | All functions that call the given symbol |
-| `get_callees(symbol)` | All functions called by the given symbol |
-| `get_domain(symbol)` | The business domain a symbol belongs to, with summary |
-| `get_domains()` | All discovered business domains with names and summaries |
-| `get_domain_content(domain)` | All functions and classes in a domain cluster |
-
----
-
-## Tech Stack
-
-| Component | Technology |
-|---|---|
-| AST Parsing | Tree-sitter (Java -- MVP language) |
-| Graph Database | Neo4j (local via Docker, production via AuraDB) |
-| Community Detection | Leiden algorithm (Neo4j GDS or graspologic) |
-| Domain Summaries | Google Gemini Flash (one call per domain cluster) |
-| MCP Server | Python MCP SDK |
-| API Backend | FastAPI + JWT auth |
-| CLI | Python Click |
-
----
-
-## Documentation
-
-| Document | Description |
-|---|---|
-| [LIVING_SPEC.md](docs/LIVING_SPEC.md) | Full living specification -- architecture, data model, auth, phases |
-| [ADR-001](docs/decisions/ADR-001-rule-interpretation-strategy.md) | Rule interpretation is query-time, not index-time |
-| [ADR-002](docs/decisions/ADR-002-code-discovery-strategy.md) | Hybrid discovery: agent-led + Lucene keyword search |
-| [ADR-003](docs/decisions/ADR-003-presentation-tier-strategy.md) | Presentation tier strategy (proposed, not yet decided) |
-| [Requirements Alignment](docs/requirements-alignment.md) | Course requirements mapped to project design |
-
----
-
-## Development Phases
-
-| Phase | Scope | Status |
+| Variable | Default | Description |
 |---|---|---|
-| 1 -- Core Ingestion | Tree-sitter Java parser, CLI indexer, file watcher | 🟡 In progress |
-| 2 -- Graph + MCP | Neo4j schema, Lucene index, MCP server | ⬜ Planned |
-| 3 -- Intelligence | Domain clustering (Leiden), LLM domain summaries | ⬜ Planned |
-| 4 -- Auth + UI | JWT auth, admin panel, demo interface | ⬜ Planned |
-| 5 -- Testing + Docs | Full pytest suite, CI, documentation, final report | ⬜ Planned |
+| `NEO4J_URI` | `bolt://localhost:7687` | Use `bolt://neo4j:7687` inside Docker |
+| `NEO4J_USERNAME` | `neo4j` | Neo4j username |
+| `NEO4J_PASSWORD` | `codelens_dev` | Must match Docker Compose config |
+| `GROQ_API_KEY` | — | Required for domain clustering and chat |
+| `GROQ_MODEL_FAST` | `llama-3.1-8b-instant` | Chat streaming model |
+| `GROQ_MODEL_QUALITY` | `llama-3.3-70b-versatile` | Domain naming model |
+| `JWT_SECRET_KEY` | `change_me` | Change before any shared deployment |
+| `JWT_EXPIRY_MINUTES` | `1440` | Token lifetime (24 hours) |
 
-## Code Style
+Frontend (`frontend/.env.local`):
 
-The project uses Ruff for Python linting and import organization.
-
-Before opening a pull request, run:
-
-```bash
-ruff check .
-```
-
-To automatically fix supported issues:
-
-```bash
-ruff check . --fix
-```
-
-Contributors are encouraged to use the repository's `.editorconfig` settings to maintain consistent formatting across editors and operating systems.
+| Variable | Default | Description |
+|---|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | FastAPI backend URL |
+| `NEXT_PUBLIC_MOCK_MODE` | — | Set to `true` to bypass backend |

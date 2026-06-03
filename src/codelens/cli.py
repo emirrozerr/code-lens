@@ -212,26 +212,24 @@ def mcp(verbose: bool, transport: str, host: str, port: int):
     _setup_logging(verbose)
     from codelens.mcp_server.server import mcp as mcp_server
     
-    click.echo("\n  CodeLens MCP Server")
-    click.echo(f"  {'─' * 40}")
-    
     try:
         if transport == "sse":
-            click.echo(f"  Starting FastMCP on SSE ({host}:{port})...")
-            click.echo(f"  SSE Endpoint: http://{host}:{port}/sse\n")
+            click.echo(f"\n  CodeLens MCP Server", err=True)
+            click.echo(f"  {'─' * 40}", err=True)
+            click.echo(f"  Starting FastMCP on SSE ({host}:{port})...", err=True)
+            click.echo(f"  SSE Endpoint: http://{host}:{port}/sse\n", err=True)
             mcp_server.settings.host = host
             mcp_server.settings.port = port
-            
+
             # Allow all origins for local Docker access
             mcp_server.settings.transport_security.enable_dns_rebinding_protection = False
             mcp_server.settings.transport_security.allowed_origins = ["*"]
             mcp_server.settings.transport_security.allowed_hosts = ["*"]
             mcp_server.run(transport="sse")
         else:
-            click.echo("  Starting FastMCP on stdio...\n")
             mcp_server.run()
     except Exception as e:
-        click.secho(f"\n  ✖ Server failed: {e}", fg="red")
+        click.secho(f"\n  ✖ Server failed: {e}", fg="red", err=True)
         if verbose:
             import traceback
             traceback.print_exc()
